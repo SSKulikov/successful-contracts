@@ -175,15 +175,22 @@ export const parseFile = (req: Request, res: Response) => {
 
     if (!req.file) return res.status(400).json({ error: "Файл не загружен" });
 
-    const fileExtension = path.extname(req.file.originalname); // Получаем расширение файла
-    const fileNameWithoutExtension = path.parse(req.file.filename).name; // Получаем имя файла без расширения
-    const parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension);
-    // Возвращаем parsedJson вместе с другими данными
-    res.json({
-      message: "Файл загружен",
-      filename: req.file.filename,
-      path: req.file.path,
-      parsedJson, // Добавляем parsedJson в ответ
-    });
+    try {
+      const fileExtension = path.extname(req.file.originalname); // Получаем расширение файла
+      const fileNameWithoutExtension = path.parse(req.file.filename).name; // Получаем имя файла без расширения
+      const parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension);
+      // Возвращаем parsedJson вместе с другими данными
+      res.json({
+        message: "Файл загружен",
+        filename: req.file.filename,
+        path: req.file.path,
+        parsedJson, // Добавляем parsedJson в ответ
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Ошибка обработки файла";
+      logger.error(`Ошибка parse-file: ${message}`);
+      return res.status(500).json({ error: message });
+    }
   });
 };

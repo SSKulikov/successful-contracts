@@ -22,10 +22,14 @@ export class PdfService {
       "text",
       `${pdfName}.txt`
     );
+    const textDir = path.dirname(textFilePath);
 
     // Создаем директорию для изображений
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
+    }
+    if (!fs.existsSync(textDir)) {
+      fs.mkdirSync(textDir, { recursive: true });
     }
 
     const options = {
@@ -90,6 +94,12 @@ export class PdfService {
         logger.error(`Ошибка: ${result.reason}`);
       }
     });
+
+    if (!textContent.trim()) {
+      throw new Error(
+        "Не удалось извлечь текст из PDF. Установите GraphicsMagick/ImageMagick (команда `gm`/`convert`) и повторите попытку."
+      );
+    }
 
     // Сохраняем текст в файл
     fs.writeFileSync(textFilePath, textContent, "utf8");
