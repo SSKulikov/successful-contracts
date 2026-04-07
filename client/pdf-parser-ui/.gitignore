@@ -31,3 +31,4 @@ Thumbs.db
 # Скомпилированные файлы (если есть, например для React, Vue, и т.д.)
 *.css.map
 *.js.map
+*.tsbuildinfo
