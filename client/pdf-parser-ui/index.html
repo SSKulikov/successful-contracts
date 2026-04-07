@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Умные документы</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+<div class="spinner-border text-success" role="status" id="loadingSpinner">
+    <span class="visually-hidden"></span>
+</div>
+<div class="container">
+    <h1 class="mt-5">Умные документы</h1>
+    <form id="myForm">
+        <h4>Договор</h4>
+
+        <button type="button" class="btn btn-success" id="uploadFileBtn">Выбрать файл для автозаполнения</button>
+        <input type="file" id="fileInput" style="display: none;">
+
+        <!-- Contract Details -->
+<!--        <div class="form-group">-->
+<!--            <label for="contract_type">Тип договора:</label>-->
+<!--            <input type="text" class="form-control" id="contract_type" >-->
+<!--        </div>-->
+        <div class="form-group">
+            <label for="contract_number">Номер договора:</label>
+            <input type="text" class="form-control" id="contract_number" >
+        </div>
+        <div class="form-group">
+            <label for="contract_subject">Предмет договора:</label>
+            <input type="text" class="form-control" id="contract_subject" >
+        </div>
+        <div class="form-group">
+            <label for="item">Статья расходов:</label>
+            <input type="text" class="form-control" id="item" >
+        </div>
+        <div class="double-block">
+            <div class="form-group">
+                <label for="contract_sum">Сумма договора:</label>
+                <input type="text" class="form-control" id="contract_sum" >
+            </div>
+            <div class="form-group">
+                <label for="contract_currency">Валюта оплаты:</label>
+                <input type="text" class="form-control" id="contract_currency" >
+            </div>
+        </div>
+
+<!--        <div class="double-block">-->
+<!--            <div class="form-group">-->
+<!--                <label for="payment_1_sum">Сумма первого платежа:</label>-->
+<!--                <input type="text" class="form-control" id="payment_1_sum" >-->
+<!--            </div>-->
+<!--            <div class="form-group">-->
+<!--                <label for="payment_1_date">Дата первого платежа:</label>-->
+<!--                <input type="date" class="form-control" id="payment_1_date" >-->
+<!--            </div>-->
+<!--        </div>-->
+
+<!--        <div class="double-block">-->
+<!--            <div class="form-group">-->
+<!--                <label for="payment_2_sum">Сумма второго платежа:</label>-->
+<!--                <input type="text" class="form-control" id="payment_2_sum" >-->
+<!--            </div>-->
+<!--            <div class="form-group">-->
+<!--                <label for="payment_2_date">Дата второго платежа:</label>-->
+<!--                <input type="date" class="form-control" id="payment_2_date" >-->
+<!--            </div>-->
+<!--        </div>-->
+
+        <div class="double-block">
+            <div class="form-group">
+                <label for="contract_date">Дата договора:</label>
+                <input type="date" class="form-control" id="contract_date" >
+            </div>
+            <div class="form-group">
+                <label for="contract_start_date">Дата начала договора:</label>
+                <input type="date" class="form-control" id="contract_start_date" >
+            </div>
+            <div class="form-group">
+                <label for="contract_end_date">Дата окончания договора:</label>
+                <input type="date" class="form-control" id="contract_end_date" >
+            </div>
+        </div>
+
+        <h4>Реквизиты сторон</h4>
+
+        <div class="parties-agreement">
+
+            <div class="supplier">
+                <!-- Supplier Details -->
+                <h5>Поставщик</h5>
+                <div class="form-group">
+                    <label for="supplier_name">Название компании:</label>
+                    <input type="text" class="form-control" id="supplier_name" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_inn">ИНН:</label>
+                    <input type="number" class="form-control" id="supplier_inn" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_kpp">КПП:</label>
+                    <input type="number" class="form-control" id="supplier_kpp" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_ogrn">ОГРН:</label>
+                    <input type="number" class="form-control" id="supplier_ogrn" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_bik">БИК:</label>
+                    <input type="text" class="form-control" id="supplier_bik" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_corr_account">Корр. счёт:</label>
+                    <input type="text" class="form-control" id="supplier_corr_account" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_payment_account">Платёжный счёт:</label>
+                    <input type="text" class="form-control" id="supplier_payment_account" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_email">Email:</label>
+                    <input type="text" class="form-control" id="supplier_email" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_phone">Телефон:</label>
+                    <input type="text" class="form-control" id="supplier_phone" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_address">Адрес:</label>
+                    <input type="text" class="form-control" id="supplier_address" >
+                </div>
+                <div class="form-group">
+                    <label for="supplier_bank_name">Название банка:</label>
+                    <input type="text" class="form-control" id="supplier_bank_name" >
+                </div>
+            </div>
+            <div class="customer">
+                <!-- Customer Details -->
+                <h5>Заказчик</h5>
+                <div class="form-group">
+                    <label for="customer_name">Название компании:</label>
+                    <input type="text" class="form-control" id="customer_name" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_inn">ИНН:</label>
+                    <input type="number" class="form-control" id="customer_inn" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_kpp">КПП:</label>
+                    <input type="number" class="form-control" id="customer_kpp" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_ogrn">ОГРН:</label>
+                    <input type="number" class="form-control" id="customer_ogrn" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_bik">БИК:</label>
+                    <input type="text" class="form-control" id="customer_bik" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_corr_account">Корр. счёт:</label>
+                    <input type="text" class="form-control" id="customer_corr_account" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_payment_account">Платёжный счёт:</label>
+                    <input type="text" class="form-control" id="customer_payment_account" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_email">Email:</label>
+                    <input type="text" class="form-control" id="customer_email" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_phone">Телефон:</label>
+                    <input type="text" class="form-control" id="customer_phone" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_address">Адрес:</label>
+                    <input type="text" class="form-control" id="customer_address" >
+                </div>
+                <div class="form-group">
+                    <label for="customer_bank_name">Название банка:</label>
+                    <input type="text" class="form-control" id="customer_bank_name" >
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Buttons -->
+        <button type="submit" class="btn btn-primary">Отправить</button>
+    </form>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

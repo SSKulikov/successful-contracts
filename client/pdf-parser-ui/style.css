@@ -1,0 +1,54 @@
+body {
+    margin-bottom: 10rem;
+}
+
+.parties-agreement {
+    display: flex;
+    justify-content: space-between;
+
+    .customer, .supplier {
+        width: 45%
+    }
+}
+
+.double-block {
+    display: flex;
+    justify-content: space-between;
+    .form-group {
+        width: 45%
+    }
+}
+
+.spinner-border {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 1050;
+    background: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+}
+
+button.btn.btn-primary {
+    width: 100%;
+    height: 4rem;
+}
+
+button#uploadFileBtn {
+    height: 4rem;
+    width: 100%;
+    margin-top: 2rem;
+}
+
+h1.mt-5 {
+    margin-bottom: 6rem;
+    display: flex
+;
+    justify-content: center;
+}
+
+h4 {
+    display: flex
+;
+    justify-content: center;
+}

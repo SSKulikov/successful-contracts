@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model contract {
+  id                       Int      @id @default(autoincrement())
+  supplier_name            String?
+  supplier_inn             BigInt?  @db.UnsignedBigInt
+  supplier_kpp             BigInt?  @db.UnsignedBigInt
+  supplier_ogrn            BigInt?  @db.UnsignedBigInt
+  supplier_bik             String?
+  supplier_corr_account    String?
+  supplier_payment_account String?
+  supplier_email           String?
+  supplier_phone           String?
+  supplier_address         String?
+  supplier_bank_name       String?
+
+  customer_name            String?
+  customer_inn             BigInt?  @db.UnsignedBigInt
+  customer_kpp             BigInt?  @db.UnsignedBigInt
+  customer_ogrn            BigInt?  @db.UnsignedBigInt
+  customer_bik             String?
+  customer_corr_account    String?
+  customer_payment_account String?
+  customer_email           String?
+  customer_phone           String?
+  customer_address         String?
+  customer_bank_name       String?
+
+  contract_number          String?
+  contract_subject         String?
+  item                     String?
+  contract_sum             BigInt?  @db.UnsignedBigInt
+  contract_currency        String?
+  contract_date            String?
+  contract_start_date      String?
+  contract_end_date        String?
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
