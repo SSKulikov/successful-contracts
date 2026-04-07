@@ -1,9 +1,8 @@
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "../shared/layout/AppLayout";
+import { AuthPage } from "../pages/AuthPage";
 import { ContractsPage } from "../pages/ContractsPage";
 import { LandingPage } from "../pages/LandingPage";
-import { LoginPage } from "../pages/LoginPage";
-import { RegisterPage } from "../pages/RegisterPage";
 
 export const appRouter = createBrowserRouter([
   {
@@ -11,8 +10,7 @@ export const appRouter = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <LandingPage /> },
-      { path: "login", element: <LoginPage /> },
-      { path: "register", element: <RegisterPage /> },
+      { path: "auth", element: <AuthPage /> },
       { path: "contracts", element: <ContractsPage /> }
     ]
   }
