@@ -9,11 +9,11 @@ export function LandingPage() {
     <div className="landing">
       <section className="landing-hero">
         <Typography.Title className="landing-title">
-          Надежное хранение и согласование документов
+          Согласование документов без лишней сложности
         </Typography.Title>
         <Typography.Paragraph className="landing-subtitle">
-          Единое пространство для работы с контрактами. Удобный поиск, прозрачный процесс согласования и полный
-          контроль над документами компании.
+          Единое пространство для договоров, УПД, счетов, актов и накладных. Загружайте документы, отправляйте на
+          согласование по маршруту и отслеживайте статус в одном интерфейсе.
         </Typography.Paragraph>
 
         <div className="landing-actions">
@@ -21,14 +21,17 @@ export function LandingPage() {
             type="primary"
             size="large"
             className="landing-btn-primary"
-            onClick={() => navigate("/contracts")}
+            onClick={() => navigate("/auth")}
           >
             Начать работу
           </Button>
           <Button size="large" className="landing-btn-secondary" onClick={() => navigate("/auth")}>
-            Войти в систему
+            Войти
           </Button>
         </div>
+        <Typography.Paragraph className="landing-hint">
+          Регистрацию компании выполняет администратор. Сотрудников добавляют внутри админ-панели.
+        </Typography.Paragraph>
       </section>
 
       <div className="landing-divider" />
@@ -39,10 +42,10 @@ export function LandingPage() {
             <FileTextOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            Единый реестр
+            Мои документы
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
-            Все договоры в одном месте с удобным поиском и фильтрацией.
+            Поиск, фильтры и полный список документов со всеми статусами.
           </Typography.Paragraph>
         </Card>
 
@@ -51,10 +54,10 @@ export function LandingPage() {
             <SafetyOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            Прозрачное согласование
+            Мои согласования
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
-            Четкие маршруты утверждения документов с историей комментариев.
+            Документы, которые пришли на вашу роль: согласовать, отклонить или вернуть на доработку.
           </Typography.Paragraph>
         </Card>
 
@@ -63,10 +66,10 @@ export function LandingPage() {
             <ClockCircleOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            Контроль сроков
+            Прозрачный процесс
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
-            Отслеживание статусов и сроков действий по каждому контракту.
+            История действий и статусы по каждому документу для инициатора и согласующих.
           </Typography.Paragraph>
         </Card>
       </section>

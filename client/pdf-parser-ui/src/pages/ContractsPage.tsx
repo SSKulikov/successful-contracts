@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import axios from "axios";
 import { Button, Card, Flex, Spin, Typography, message } from "antd";
+import { contractsApi } from "../shared/api";
 
 type ContractFormValues = {
   contract_number: string;
@@ -68,8 +68,6 @@ const initialValues: ContractFormValues = {
   customer_bank_name: ""
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
-
 export function ContractsPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [formValues, setFormValues] = useState<ContractFormValues>(initialValues);
@@ -135,15 +133,10 @@ export function ContractsPage() {
       return;
     }
 
-    const payload = new FormData();
-    payload.append("file", file);
-
     setLoading(true);
     try {
-      const response = await axios.post(`${API_BASE_URL}/parse-file`, payload, {
-        headers: { "Content-Type": "multipart/form-data" }
-      });
-      fillFromParsedJson(response.data?.parsedJson);
+      const response = await contractsApi.parseFile(file);
+      fillFromParsedJson(response?.parsedJson);
       message.success("Документ загружен и данные автозаполнены");
     } catch {
       message.error("Не удалось распознать файл");
@@ -157,9 +150,7 @@ export function ContractsPage() {
     event.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/save-data-info`, formValues, {
-        headers: { "Content-Type": "application/json" }
-      });
+      await contractsApi.saveDataInfo(formValues);
       message.success("Данные успешно сохранены");
       setFormValues(initialValues);
     } catch {
