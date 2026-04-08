@@ -1,43 +1,49 @@
-import { Layout, Menu, Typography } from "antd";
-import type { MenuProps } from "antd";
-import { FileTextOutlined, HomeOutlined, LoginOutlined } from "@ant-design/icons";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Button, Layout, Typography } from "antd";
+import { Outlet, useNavigate } from "react-router-dom";
 
-const { Header, Sider, Content } = Layout;
-
-const menuItems: MenuProps["items"] = [
-  { key: "/", icon: <HomeOutlined />, label: "Главная" },
-  { key: "/auth", icon: <LoginOutlined />, label: "Вход / Регистрация" },
-  { key: "/contracts", icon: <FileTextOutlined />, label: "Договоры" }
-];
+const { Header, Content } = Layout;
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const location = useLocation();
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider width={240} breakpoint="lg" collapsedWidth={0}>
-        <div className="brand">PDF Parser</div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-        />
-      </Sider>
-
-      <Layout>
-        <Header className="app-header">
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            ...
+      <Header className="app-header">
+        <div className="app-header-inner">
+          <Typography.Title level={4} className="brand">
+            DocFlow
           </Typography.Title>
-        </Header>
-        <Content className="app-content">
-          <Outlet />
-        </Content>
-      </Layout>
+          <div className="app-header-actions">
+            <Button type="text" onClick={() => navigate("/")}>
+              Главная
+            </Button>
+            <Button type="text" onClick={() => navigate("/auth")}>
+              Войти
+            </Button>
+            <Button type="text" onClick={() => navigate("/workspace")}>
+              Рабочее место
+            </Button>
+            <Button type="text" onClick={() => navigate("/my-documents")}>
+              Мои документы
+            </Button>
+            <Button type="text" onClick={() => navigate("/my-approvals")}>
+              Мои согласования
+            </Button>
+            <Button type="text" onClick={() => navigate("/profile")}>
+              Профиль
+            </Button>
+            <Button type="text" onClick={() => navigate("/admin-panel")}>
+              Админ-панель
+            </Button>
+            <Button type="primary" onClick={() => navigate("/contracts")}>
+              Документы
+            </Button>
+          </div>
+        </div>
+      </Header>
+      <Content className="app-content">
+        <Outlet />
+      </Content>
     </Layout>
   );
 }
