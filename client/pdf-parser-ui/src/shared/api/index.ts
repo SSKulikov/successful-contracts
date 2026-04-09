@@ -47,6 +47,11 @@ export type UserProfile = {
   fullName: string;
   email: string;
   roleLabel: string;
+  position?: string;
+};
+
+export type AuthUser = UserProfile & {
+  role: "admin" | "employee";
 };
 
 export type EmployeeRow = {
@@ -67,9 +72,23 @@ export type RouteRow = {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
 const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? "true") === "true";
+const USE_MOCK_ADMIN_API = (import.meta.env.VITE_USE_MOCK_ADMIN_API ?? "false") === "true";
+const USE_MOCK_PROFILE_API = (import.meta.env.VITE_USE_MOCK_PROFILE_API ?? "false") === "true";
+
+export const AUTH_TOKEN_STORAGE_KEY = "docflow-auth-token";
+export const AUTH_USER_STORAGE_KEY = "docflow-auth-user";
+export const USER_ROLE_STORAGE_KEY = "docflow-user-role";
 
 const httpClient = axios.create({
   baseURL: API_BASE_URL
+});
+
+httpClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 const mockDocuments: DocumentRow[] = [
@@ -288,30 +307,37 @@ export const approvalsApi = {
 
 export const profileApi = {
   async getMyProfile(): Promise<UserProfile> {
-    if (USE_MOCK_API) return Promise.resolve(mockProfile);
+    if (USE_MOCK_API && USE_MOCK_PROFILE_API) return Promise.resolve(mockProfile);
     const response = await httpClient.get("/users/me");
     return response.data;
   },
   async updateMyProfile(payload: Pick<UserProfile, "fullName" | "email">) {
-    if (USE_MOCK_API) return Promise.resolve({ ...mockProfile, ...payload });
+    if (USE_MOCK_API && USE_MOCK_PROFILE_API) return Promise.resolve({ ...mockProfile, ...payload });
     const response = await httpClient.patch("/users/me", payload);
     return response.data;
   },
   async changeMyPassword(payload: { currentPassword: string; newPassword: string }) {
-    if (USE_MOCK_API) return Promise.resolve({ ok: true });
+    if (USE_MOCK_API && USE_MOCK_PROFILE_API) return Promise.resolve({ ok: true });
     const response = await httpClient.post("/users/me/change-password", payload);
     return response.data;
   }
 };
 
+export const authApi = {
+  async login(payload: { email: string; password: string }) {
+    const response = await httpClient.post("/auth/login", payload);
+    return response.data as { token: string; isTemporaryPassword: boolean; user: UserProfile };
+  }
+};
+
 export const adminApi = {
   async listEmployees(): Promise<EmployeeRow[]> {
-    if (USE_MOCK_API) return Promise.resolve(mockEmployees);
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve(mockEmployees);
     const response = await httpClient.get("/admin/employees");
     return response.data?.items ?? [];
   },
-  async createEmployee(payload: { fullName: string; email: string; position: string; roles: string[] }) {
-    if (USE_MOCK_API) return Promise.resolve({ id: "mock-new-employee", ...payload });
+  async createEmployee(payload: { fullName: string; email: string; position: string; roles: string[]; oneTimePassword?: string }) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ id: "mock-new-employee", ...payload });
     const response = await httpClient.post("/admin/employees", payload);
     return response.data;
   },

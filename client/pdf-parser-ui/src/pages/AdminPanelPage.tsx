@@ -2,11 +2,19 @@ import { PlusOutlined, RedoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useState } from "react";
 import { adminApi, EmployeeRow, RouteRow } from "../shared/api";
+
+function generateOneTimePassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+}
 
 export function AdminPanelPage() {
   const [employeeForm] = Form.useForm();
   const [routeForm] = Form.useForm();
+  const [generatedOneTimePassword, setGeneratedOneTimePassword] = useState(generateOneTimePassword);
+  const [lastIssuedPassword, setLastIssuedPassword] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { data: employees = [], isLoading: isEmployeesLoading } = useQuery({
     queryKey: ["admin-employees"],
@@ -18,9 +26,18 @@ export function AdminPanelPage() {
   });
   const createEmployeeMutation = useMutation({
     mutationFn: adminApi.createEmployee,
-    onSuccess: () => {
+    onSuccess: (response: { oneTimePassword?: string }) => {
       message.success("Сотрудник добавлен");
+      if (response?.oneTimePassword) {
+        setLastIssuedPassword(response.oneTimePassword);
+        setGeneratedOneTimePassword(response.oneTimePassword);
+        employeeForm.setFieldValue("oneTimePassword", response.oneTimePassword);
+        message.info(`Одноразовый пароль: ${response.oneTimePassword}`);
+      }
       employeeForm.resetFields();
+      const nextPassword = generateOneTimePassword();
+      setGeneratedOneTimePassword(nextPassword);
+      employeeForm.setFieldValue("oneTimePassword", nextPassword);
       queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
     }
   });
@@ -98,7 +115,10 @@ export function AdminPanelPage() {
 
   const handleCreateEmployee = async () => {
     const values = await employeeForm.validateFields();
-    await createEmployeeMutation.mutateAsync(values);
+    await createEmployeeMutation.mutateAsync({
+      ...values,
+      oneTimePassword: values.oneTimePassword || generatedOneTimePassword
+    });
   };
 
   const handleCreateRoute = async () => {
@@ -122,7 +142,13 @@ export function AdminPanelPage() {
             children: (
               <Space direction="vertical" size={16} style={{ width: "100%" }}>
                 <Card title="Создать сотрудника">
-                  <Form form={employeeForm} layout="vertical">
+                  <Form
+                    form={employeeForm}
+                    layout="vertical"
+                    initialValues={{
+                      oneTimePassword: generatedOneTimePassword
+                    }}
+                  >
                     <Space wrap style={{ width: "100%" }}>
                       <Form.Item
                         label="ФИО"
@@ -167,7 +193,31 @@ export function AdminPanelPage() {
                           ]}
                         />
                       </Form.Item>
+                      <Form.Item
+                        label="Одноразовый пароль"
+                        name="oneTimePassword"
+                        tooltip="Сотрудник использует этот пароль для первого входа."
+                        style={{ minWidth: 260 }}
+                      >
+                        <Input value={generatedOneTimePassword} readOnly />
+                      </Form.Item>
                     </Space>
+                    <Space style={{ marginBottom: 12 }}>
+                      <Button
+                        onClick={() => {
+                          const nextPassword = generateOneTimePassword();
+                          setGeneratedOneTimePassword(nextPassword);
+                          employeeForm.setFieldValue("oneTimePassword", nextPassword);
+                        }}
+                      >
+                        Сгенерировать заново
+                      </Button>
+                    </Space>
+                    {lastIssuedPassword && (
+                      <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+                        Пароль последнего созданного сотрудника: {lastIssuedPassword}
+                      </Typography.Text>
+                    )}
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
