@@ -103,7 +103,7 @@ export function MyApprovalsPage() {
 
   return (
     <div>
-      <Typography.Title level={3}>Мои согласования</Typography.Title>
+      <Typography.Title level={3}>В работе</Typography.Title>
       <Typography.Paragraph type="secondary">
         Список документов, которые пришли вам на согласование по роли. Пока используются мок-данные.
       </Typography.Paragraph>

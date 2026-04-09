@@ -293,6 +293,30 @@ export function AdminPanelPage() {
                 </Card>
               </Space>
             )
+          },
+          {
+            key: "company-registration",
+            label: "Регистрация компании",
+            children: (
+              <Card>
+                <Typography.Title level={4}>Регистрация компании</Typography.Title>
+                <Typography.Paragraph type="secondary">
+                  Раздел регистрации компании расположен внутри админ-панели.
+                </Typography.Paragraph>
+              </Card>
+            )
+          },
+          {
+            key: "companies",
+            label: "Зарегистрированные компании",
+            children: (
+              <Card>
+                <Typography.Title level={4}>Зарегистрированные компании</Typography.Title>
+                <Typography.Paragraph type="secondary">
+                  Раздел просмотра зарегистрированных компаний расположен внутри админ-панели.
+                </Typography.Paragraph>
+              </Card>
+            )
           }
         ]}
       />

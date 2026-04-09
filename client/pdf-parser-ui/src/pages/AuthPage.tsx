@@ -48,7 +48,7 @@ export function AuthPage() {
         JSON.stringify({ fullName: "Администратор", email: ADMIN_LOGIN, roleLabel: "Администратор", role: "admin" })
       );
       setRole("admin");
-      navigate("/workspace");
+      navigate("/admin-panel");
       return;
     }
 
@@ -64,7 +64,7 @@ export function AuthPage() {
       if (response.isTemporaryPassword) {
         message.warning("Вы вошли по одноразовому паролю. Пожалуйста, смените пароль в профиле.");
       }
-      navigate("/workspace");
+      navigate("/my-documents");
     } catch (error) {
       message.error("Неверный email или пароль");
     }
@@ -138,7 +138,7 @@ export function AuthPage() {
           <Form.Item label="Подтверждение пароля">
             <Input.Password placeholder="Повторите пароль" />
           </Form.Item>
-          <Button type="primary" block onClick={() => navigate("/workspace")}>
+          <Button type="primary" block onClick={() => navigate("/admin-panel")}>
             Зарегистрировать компанию
           </Button>
         </Form>

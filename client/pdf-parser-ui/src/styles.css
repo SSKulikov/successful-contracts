@@ -48,6 +48,34 @@ body {
   width: 100%;
 }
 
+.app-content-with-sider {
+  max-width: none;
+  margin: 0;
+}
+
+.app-sider.ant-layout-sider {
+  background: #fff;
+  border-right: 1px solid #eef0f5;
+}
+
+.app-sider-inner {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-side-menu {
+  border-inline-end: 0 !important;
+  padding-top: 12px;
+  flex: 1;
+}
+
+.app-sider-logout {
+  padding: 12px;
+  border-top: 1px solid #eef0f5;
+  background: #fff;
+}
+
 .landing {
   padding: 12px 8px 8px;
 }
@@ -222,11 +250,6 @@ body {
     align-items: flex-start;
   }
 
-  .app-header-actions {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
   .landing-title.ant-typography {
     font-size: 32px;
   }
@@ -240,5 +263,12 @@ body {
   .double-block.three-col,
   .parties-agreement {
     grid-template-columns: 1fr;
+  }
+
+  .app-sider.ant-layout-sider {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
   }
 }
