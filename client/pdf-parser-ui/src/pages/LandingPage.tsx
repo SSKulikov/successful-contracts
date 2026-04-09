@@ -25,9 +25,6 @@ export function LandingPage() {
           >
             Начать работу
           </Button>
-          <Button size="large" className="landing-btn-secondary" onClick={() => navigate("/auth")}>
-            Войти
-          </Button>
         </div>
         <Typography.Paragraph className="landing-hint">
           Регистрацию компании выполняет администратор. Сотрудников добавляют внутри админ-панели.
