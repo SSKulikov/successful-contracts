@@ -1,21 +1,36 @@
 import { LockOutlined, MailOutlined, UserOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Button, Card, Form, Input, Space, Typography, message } from "antd";
-import { profileApi } from "../shared/api";
+import { AUTH_USER_STORAGE_KEY, USER_ROLE_STORAGE_KEY, profileApi } from "../shared/api";
 
 export function ProfilePage() {
   const [profileForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
   const queryClient = useQueryClient();
+  const storedUserRaw = localStorage.getItem(AUTH_USER_STORAGE_KEY);
+  const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
+  const role = localStorage.getItem(USER_ROLE_STORAGE_KEY) === "admin" ? "admin" : "employee";
   const { data: profile, isLoading } = useQuery({
     queryKey: ["my-profile"],
-    queryFn: profileApi.getMyProfile
+    queryFn: profileApi.getMyProfile,
+    enabled: role === "employee"
   });
   const updateProfileMutation = useMutation({
     mutationFn: profileApi.updateMyProfile,
-    onSuccess: () => {
+    onSuccess: (updatedProfile) => {
+      localStorage.setItem(
+        AUTH_USER_STORAGE_KEY,
+        JSON.stringify({
+          ...storedUser,
+          ...updatedProfile,
+          role
+        })
+      );
       message.success("Профиль обновлен");
       queryClient.invalidateQueries({ queryKey: ["my-profile"] });
+    },
+    onError: () => {
+      message.error("Не удалось обновить профиль");
     }
   });
   const changePasswordMutation = useMutation({
@@ -23,8 +38,13 @@ export function ProfilePage() {
     onSuccess: () => {
       message.success("Пароль обновлен");
       passwordForm.resetFields();
+    },
+    onError: () => {
+      message.error("Не удалось обновить пароль. Проверьте текущий пароль.");
     }
   });
+
+  const currentProfile = profile ?? storedUser ?? null;
 
   const handleSaveProfile = async () => {
     const values = await profileForm.validateFields();
@@ -47,7 +67,7 @@ export function ProfilePage() {
       <div>
         <Typography.Title level={3}>Профиль</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Управление учетной записью пользователя. Пока используется демо-режим без API.
+          Управление учетной записью пользователя.
         </Typography.Paragraph>
       </div>
 
@@ -57,17 +77,17 @@ export function ProfilePage() {
             <Avatar size={64} icon={<UserOutlined />} />
             <div>
               <Typography.Title level={5} style={{ marginBottom: 0 }}>
-                {profile?.fullName ?? "Пользователь"}
+                {currentProfile?.fullName ?? "Пользователь"}
               </Typography.Title>
-              <Typography.Text type="secondary">{profile?.roleLabel ?? "Сотрудник"}</Typography.Text>
+              <Typography.Text type="secondary">{currentProfile?.roleLabel ?? "Сотрудник"}</Typography.Text>
             </div>
           </Space>
 
           <Form
             form={profileForm}
             layout="vertical"
-            initialValues={{ fullName: profile?.fullName ?? "", email: profile?.email ?? "" }}
-            key={profile?.email}
+            initialValues={{ fullName: currentProfile?.fullName ?? "", email: currentProfile?.email ?? "" }}
+            key={currentProfile?.email}
           >
             <Form.Item label="Имя" name="fullName" rules={[{ required: true, message: "Укажите имя" }]}>
               <Input prefix={<UserOutlined />} placeholder="Ваше имя" />
