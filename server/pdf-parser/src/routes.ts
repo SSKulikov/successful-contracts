@@ -15,9 +15,11 @@ import {
   withdrawDocument
 } from "./controllers/documents.controller";
 import { approveTask, listMyApprovals, rejectTask, reviseTask } from "./controllers/approvals.controller";
+import { getHealth } from "./controllers/health.controller";
 
 const router = Router();
 
+router.get("/health", getHealth);
 router.post("/parse-file", parseFile);
 router.post("/save-data-info", saveData);
 router.get("/admin/employees", listEmployees);

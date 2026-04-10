@@ -1,0 +1,74 @@
+# Локальный/staging-стек: API + MySQL + Redis. Фронт (Vite) по умолчанию запускается отдельно: см. docs/DEPLOY.md
+#
+# Запуск:  cp docker.env.example .env   # при необходимости поправьте пароли
+#          docker compose up -d --build   # предпочтительно (Compose V2). См. docs/DEPLOY.md при KeyError ContainerConfig
+#
+# Adminer (веб-UI к MySQL):  docker compose --profile tools up -d
+# Остановка:                 docker compose down
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-pdf_parser}
+    # На хосте по умолчанию 3307, чтобы не конфликтовать с локальным MySQL на 3306. Внутри сети api → mysql:3306.
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      # Пароль берётся из env внутри контейнера (тот же MYSQL_ROOT_PASSWORD)
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  api:
+    build:
+      context: ./server/pdf-parser
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # На хосте по умолчанию 3004 — часто 3003 уже занят локальным `npm start` / `node dist/index.js`.
+    ports:
+      - "${API_PORT:-3004}:3003"
+    environment:
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-devroot}@mysql:3306/${MYSQL_DATABASE:-pdf_parser}
+      REDIS_URL: redis://redis:6379
+      # Для ссылок в Excel и будущего CORS; при доступе с хоста к API на localhost:
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # Опционально: открыть http://localhost:8080 — сервер «Database», пользователь root, пароль из MYSQL_ROOT_PASSWORD
+  adminer:
+    image: adminer:4
+    restart: unless-stopped
+    profiles: [tools]
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: mysql
+
+volumes:
+  mysql_data:
+  redis_data:
