@@ -1,12 +1,13 @@
 import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Card, Input, Select, Space, Table, Tag, Typography, message } from "antd";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DocumentRow, documentsApi } from "../shared/api";
+import { contractsApi, DocumentFormPayload, DocumentRow, documentsApi } from "../shared/api";
 
 function renderStatusTag(status: DocumentRow["status"]) {
+  if (status === "Загружен") return <Tag>{status}</Tag>;
   if (status === "На согласовании") return <Tag color="processing">{status}</Tag>;
   if (status === "На доработке") return <Tag color="warning">{status}</Tag>;
   if (status === "Отклонен") return <Tag color="error">{status}</Tag>;
@@ -15,12 +16,65 @@ function renderStatusTag(status: DocumentRow["status"]) {
 
 export function MyDocumentsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [form] = Form.useForm<DocumentFormPayload>();
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
+  const [dateFrom, setDateFrom] = useState<string | undefined>(undefined);
+  const [dateTo, setDateTo] = useState<string | undefined>(undefined);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
+  const [isParsingFile, setIsParsingFile] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 350);
+    return () => window.clearTimeout(timeoutId);
+  }, [search]);
+
   const { data = [], isLoading } = useQuery({
-    queryKey: ["my-documents"],
-    queryFn: documentsApi.listMyDocuments
+    queryKey: ["my-documents", { search: debouncedSearch, statusFilter, typeFilter, dateFrom, dateTo }],
+    queryFn: () =>
+      documentsApi.listMyDocuments({
+        q: debouncedSearch || undefined,
+        status: statusFilter as DocumentRow["status"] | undefined,
+        type: typeFilter,
+        dateFrom,
+        dateTo
+      })
+  });
+  const saveDocumentMutation = useMutation({
+    mutationFn: async (payload: DocumentFormPayload) => {
+      if (editingDocumentId) {
+        return documentsApi.updateDocument(editingDocumentId, payload);
+      }
+      return documentsApi.createDocument(payload);
+    },
+    onSuccess: () => {
+      message.success(editingDocumentId ? "Документ обновлен" : "Документ создан");
+      setIsModalOpen(false);
+      setEditingDocumentId(null);
+      form.resetFields();
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+    }
+  });
+  const submitMutation = useMutation({
+    mutationFn: documentsApi.submitForApproval,
+    onSuccess: () => {
+      message.success("Документ отправлен на согласование");
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+    }
+  });
+  const resubmitMutation = useMutation({
+    mutationFn: documentsApi.resubmitForApproval,
+    onSuccess: () => {
+      message.success("Документ повторно отправлен на согласование");
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+    }
   });
   const exportMutation = useMutation({
     mutationFn: documentsApi.exportMyDocuments,
@@ -28,7 +82,7 @@ export function MyDocumentsPage() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "my-documents.csv";
+      link.download = "my-documents.xlsx";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -37,21 +91,93 @@ export function MyDocumentsPage() {
     }
   });
 
-  const filteredData = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  const openCreateModal = () => {
+    setEditingDocumentId(null);
+    form.resetFields();
+    setIsModalOpen(true);
+  };
 
-    return data.filter((doc) => {
-      const bySearch =
-        !query ||
-        doc.title.toLowerCase().includes(query) ||
-        doc.id.toLowerCase().includes(query) ||
-        doc.initiator.toLowerCase().includes(query);
-      const byStatus = !statusFilter || doc.status === statusFilter;
-      const byType = !typeFilter || doc.type === typeFilter;
+  const resetFilters = () => {
+    setSearch("");
+    setDebouncedSearch("");
+    setStatusFilter(undefined);
+    setTypeFilter(undefined);
+    setDateFrom(undefined);
+    setDateTo(undefined);
+  };
 
-      return bySearch && byStatus && byType;
-    });
-  }, [data, search, statusFilter, typeFilter]);
+  const handlePickFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = [
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      message.error("Можно загружать только PDF или Word-документы (.pdf, .doc, .docx)");
+      event.target.value = "";
+      return;
+    }
+
+    setIsParsingFile(true);
+    try {
+      const response = await contractsApi.parseFile(file);
+      const parsed = response?.parsedJson ?? {};
+      const parsedAmount = Number(String(parsed?.contract_sum ?? "").replace(",", ".").replace(/\s+/g, ""));
+
+      form.setFieldsValue({
+        number: parsed?.contract_number ?? form.getFieldValue("number"),
+        date: parsed?.contract_date ?? form.getFieldValue("date"),
+        customerName: parsed?.customer?.name ?? form.getFieldValue("customerName"),
+        customerInn: parsed?.customer?.inn ?? form.getFieldValue("customerInn"),
+        executorName: parsed?.supplier?.name ?? form.getFieldValue("executorName"),
+        executorInn: parsed?.supplier?.inn ?? form.getFieldValue("executorInn"),
+        amount: Number.isNaN(parsedAmount) ? form.getFieldValue("amount") : parsedAmount,
+        subject: parsed?.contract_subject ?? parsed?.item ?? form.getFieldValue("subject")
+      });
+
+      message.success("Файл распознан, поля формы автозаполнены");
+    } catch {
+      message.error("Не удалось распознать файл");
+    } finally {
+      setIsParsingFile(false);
+      event.target.value = "";
+    }
+  };
+
+  const openEditModal = async (row: DocumentRow) => {
+    try {
+      const details = await documentsApi.openDocument(row.id);
+      setEditingDocumentId(row.id);
+      form.setFieldsValue({
+        type: details.type,
+        number: details.fields?.number ?? "",
+        date: details.fields?.date ?? "",
+        customerName: details.fields?.customerName ?? "",
+        customerInn: details.fields?.customerInn ?? "",
+        executorName: details.fields?.executorName ?? "",
+        executorInn: details.fields?.executorInn ?? "",
+        amount: Number(String(details.amount).replace(",", ".")) || 0,
+        subject: details.fields?.subject ?? "",
+        note: details.fields?.note ?? ""
+      });
+      setIsModalOpen(true);
+    } catch {
+      message.error("Не удалось загрузить документ для редактирования");
+    }
+  };
+
+  const handleModalOk = async () => {
+    const values = await form.validateFields();
+    await saveDocumentMutation.mutateAsync(values);
+  };
 
   const columns: ColumnsType<DocumentRow> = [
     { title: "ID", dataIndex: "id", key: "id", width: 110 },
@@ -69,11 +195,29 @@ export function MyDocumentsPage() {
     {
       title: "Действия",
       key: "actions",
-      width: 140,
+      width: 320,
       render: (_, row) => (
-        <Button type="link" onClick={() => navigate(`/documents/${row.id}`)}>
-          Открыть
-        </Button>
+        <Space>
+          <Button type="link" onClick={() => navigate(`/documents/${row.id}`)}>
+            Открыть
+          </Button>
+          {row.status === "Загружен" || row.status === "На доработке" ? (
+            <>
+              <Button type="link" onClick={() => openEditModal(row)}>
+                Редактировать
+              </Button>
+              {row.status === "На доработке" ? (
+                <Button type="link" loading={resubmitMutation.isPending} onClick={() => resubmitMutation.mutate(row.id)}>
+                  Повторно отправить
+                </Button>
+              ) : (
+                <Button type="link" loading={submitMutation.isPending} onClick={() => submitMutation.mutate(row.id)}>
+                  Отправить
+                </Button>
+              )}
+            </>
+          ) : null}
+        </Space>
       )
     }
   ];
@@ -82,14 +226,14 @@ export function MyDocumentsPage() {
     <div>
       <Typography.Title level={3}>Мои документы</Typography.Title>
       <Typography.Paragraph type="secondary">
-        Реестр документов с базовыми фильтрами, поиском и экспортом. Данные пока моковые, далее подключим API.
+        Реестр документов с серверной фильтрацией и поиском.
       </Typography.Paragraph>
 
       <Card>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Space wrap>
             <Input.Search
-              placeholder="Поиск по ID, названию или инициатору"
+              placeholder="Поиск по номеру, контрагенту или ИНН"
               allowClear
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -103,6 +247,7 @@ export function MyDocumentsPage() {
               onChange={(value) => setStatusFilter(value)}
               options={[
                 { value: "На согласовании", label: "На согласовании" },
+                { value: "Загружен", label: "Загружен" },
                 { value: "На доработке", label: "На доработке" },
                 { value: "Отклонен", label: "Отклонен" },
                 { value: "Согласован", label: "Согласован" }
@@ -120,22 +265,94 @@ export function MyDocumentsPage() {
                 { value: "Акт", label: "Акт" }
               ]}
             />
+            <DatePicker
+              placeholder="Дата с"
+              format="YYYY-MM-DD"
+              onChange={(_, dateString) => setDateFrom(typeof dateString === "string" && dateString ? dateString : undefined)}
+            />
+            <DatePicker
+              placeholder="Дата по"
+              format="YYYY-MM-DD"
+              onChange={(_, dateString) => setDateTo(typeof dateString === "string" && dateString ? dateString : undefined)}
+            />
+            <Button onClick={resetFilters}>Сбросить фильтры</Button>
             <Button icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
               Выгрузить в Excel
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/contracts")}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
               Создать документ
             </Button>
           </Space>
 
           <Table
             columns={columns}
-            dataSource={filteredData}
+            dataSource={data}
             loading={isLoading}
             pagination={{ pageSize: 8 }}
           />
         </Space>
       </Card>
+      <Modal
+        title={editingDocumentId ? "Редактировать документ" : "Создать документ"}
+        open={isModalOpen}
+        onOk={handleModalOk}
+        onCancel={() => setIsModalOpen(false)}
+        confirmLoading={saveDocumentMutation.isPending}
+        width={760}
+      >
+        <Space style={{ marginBottom: 12 }}>
+          <Button onClick={handlePickFile} loading={isParsingFile}>
+            Загрузить PDF/DOCX для автозаполнения
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          />
+        </Space>
+        <Form form={form} layout="vertical">
+          <Form.Item name="type" label="Тип документа" rules={[{ required: true, message: "Укажите тип документа" }]}>
+            <Select
+              options={[
+                { value: "Договор", label: "Договор" },
+                { value: "УПД", label: "УПД" },
+                { value: "Счет", label: "Счет" },
+                { value: "Акт", label: "Акт" },
+                { value: "Накладная", label: "Накладная" }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="number" label="Номер" rules={[{ required: true, message: "Укажите номер" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="date" label="Дата" rules={[{ required: true, message: "Укажите дату (YYYY-MM-DD)" }]}>
+            <Input placeholder="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="customerName" label="Наименование заказчика" rules={[{ required: true, message: "Укажите заказчика" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="customerInn" label="ИНН заказчика" rules={[{ required: true, message: "Укажите ИНН заказчика" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="executorName" label="Наименование исполнителя" rules={[{ required: true, message: "Укажите исполнителя" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="executorInn" label="ИНН исполнителя" rules={[{ required: true, message: "Укажите ИНН исполнителя" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="amount" label="Сумма" rules={[{ required: true, message: "Укажите сумму" }]}>
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="subject" label="Основание / предмет" rules={[{ required: true, message: "Укажите предмет документа" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="note" label="Примечание">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

@@ -30,7 +30,6 @@ export function AppLayout() {
     () => [
       { key: "/profile", label: "Профиль" },
       { key: "/my-documents", label: "Мои документы" },
-      { key: "/contracts", label: "Загрузить документы" },
       { key: "/my-approvals", label: "В работе" }
     ],
     []
