@@ -90,6 +90,22 @@ export function MyDocumentsPage() {
       message.success("Экспорт подготовлен");
     }
   });
+  const withdrawMutation = useMutation({
+    mutationFn: documentsApi.withdrawFromApproval,
+    onSuccess: () => {
+      message.success("Документ отозван с согласования");
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+    }
+  });
+  const deleteMutation = useMutation({
+    mutationFn: documentsApi.deleteDocument,
+    onSuccess: () => {
+      message.success("Документ удален");
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+    }
+  });
 
   const openCreateModal = () => {
     setEditingDocumentId(null);
@@ -179,17 +195,50 @@ export function MyDocumentsPage() {
     await saveDocumentMutation.mutateAsync(values);
   };
 
+  const sortByText = (a: string | undefined, b: string | undefined) => String(a ?? "").localeCompare(String(b ?? ""), "ru");
+  const sortByAmount = (a: string, b: string) => {
+    const left = Number(String(a).replace(",", ".").replace(/[^\d.-]/g, ""));
+    const right = Number(String(b).replace(",", ".").replace(/[^\d.-]/g, ""));
+    return (Number.isNaN(left) ? 0 : left) - (Number.isNaN(right) ? 0 : right);
+  };
+  const sortByDate = (a: string | undefined, b: string | undefined) => new Date(String(a ?? "")).getTime() - new Date(String(b ?? "")).getTime();
+
   const columns: ColumnsType<DocumentRow> = [
-    { title: "ID", dataIndex: "id", key: "id", width: 110 },
-    { title: "Тип", dataIndex: "type", key: "type", width: 150 },
-    { title: "Название", dataIndex: "title", key: "title" },
-    { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170 },
-    { title: "Сумма", dataIndex: "amount", key: "amount", width: 140 },
+    { title: "ID", dataIndex: "id", key: "id", width: 110, sorter: (a, b) => sortByText(a.id, b.id) },
+    {
+      title: "Тип",
+      dataIndex: "type",
+      key: "type",
+      width: 150,
+      sorter: (a, b) => sortByText(a.type, b.type),
+      filters: Array.from(new Set(data.map((item) => item.type))).map((value) => ({ text: value, value })),
+      onFilter: (value, record) => record.type === value
+    },
+    { title: "Название", dataIndex: "title", key: "title", sorter: (a, b) => sortByText(a.title, b.title) },
+    { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170, sorter: (a, b) => sortByText(a.initiator, b.initiator) },
+    { title: "Сумма", dataIndex: "amount", key: "amount", width: 140, sorter: (a, b) => sortByAmount(a.amount, b.amount) },
+    {
+      title: "Создан",
+      dataIndex: "createdAt",
+      key: "createdAt",
+      width: 180,
+      sorter: (a, b) => sortByDate(a.createdAt, b.createdAt),
+      render: (value?: string) => (value ? new Date(value).toLocaleString("ru-RU") : "-")
+    },
     {
       title: "Статус",
       dataIndex: "status",
       key: "status",
       width: 150,
+      sorter: (a, b) => sortByText(a.status, b.status),
+      filters: [
+        { text: "Загружен", value: "Загружен" },
+        { text: "На согласовании", value: "На согласовании" },
+        { text: "На доработке", value: "На доработке" },
+        { text: "Отклонен", value: "Отклонен" },
+        { text: "Согласован", value: "Согласован" }
+      ],
+      onFilter: (value, record) => record.status === value,
       render: (value: DocumentRow["status"]) => renderStatusTag(value)
     },
     {
@@ -215,7 +264,41 @@ export function MyDocumentsPage() {
                   Отправить
                 </Button>
               )}
+              <Button
+                type="link"
+                danger
+                loading={deleteMutation.isPending}
+                onClick={() =>
+                  Modal.confirm({
+                    title: "Удалить документ?",
+                    content: "Документ будет удален без возможности восстановления.",
+                    okText: "Удалить",
+                    okButtonProps: { danger: true },
+                    cancelText: "Отмена",
+                    onOk: () => deleteMutation.mutateAsync(row.id)
+                  })
+                }
+              >
+                Удалить
+              </Button>
             </>
+          ) : null}
+          {row.status === "На согласовании" ? (
+            <Button
+              type="link"
+              loading={withdrawMutation.isPending}
+              onClick={() =>
+                Modal.confirm({
+                  title: "Отозвать документ с согласования?",
+                  content: "После отзыва документ вернется в статус 'Загружен'.",
+                  okText: "Отозвать",
+                  cancelText: "Отмена",
+                  onOk: () => withdrawMutation.mutateAsync(row.id)
+                })
+              }
+            >
+              Отозвать
+            </Button>
           ) : null}
         </Space>
       )

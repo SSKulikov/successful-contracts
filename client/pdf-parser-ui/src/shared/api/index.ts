@@ -10,6 +10,7 @@ export type DocumentRow = {
   initiator: string;
   amount: string;
   status: DocumentStatus;
+  createdAt?: string;
 };
 
 export type DocumentFormPayload = {
@@ -341,7 +342,8 @@ export const documentsApi = {
       title: item.title,
       initiator: item.initiator ?? item.counterparty ?? "-",
       amount: item.amount,
-      status: mapStatusFromApi(String(item.status))
+      status: mapStatusFromApi(String(item.status)),
+      createdAt: (item as { createdAt?: string }).createdAt
     }));
   },
   async exportMyDocuments(): Promise<Blob> {
@@ -396,6 +398,16 @@ export const documentsApi = {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, documentId });
     const response = await httpClient.post(`/documents/${documentId}/resubmit`);
     return response.data;
+  },
+  async withdrawFromApproval(documentId: string) {
+    if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId, status: "uploaded" });
+    const response = await httpClient.post(`/documents/${documentId}/withdraw`);
+    return response.data;
+  },
+  async deleteDocument(documentId: string) {
+    if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId });
+    const response = await httpClient.delete(`/documents/${documentId}`);
+    return response.data as { ok: true; id: string };
   }
 };
 
