@@ -578,6 +578,144 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
   }
 }
 
+export async function withdrawDocument(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ message: "Отсутствует токен авторизации" });
+      return;
+    }
+
+    const employee = await resolveEmployeeContextByToken(token);
+    if (!employee) {
+      res.status(401).json({ message: "Сессия не найдена" });
+      return;
+    }
+
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      res.status(400).json({ message: "Некорректный id документа" });
+      return;
+    }
+
+    const document = await getApprovalDocumentAccessRow(documentId);
+    if (!document) {
+      res.status(404).json({ message: "Документ не найден" });
+      return;
+    }
+
+    if (employee.companyId !== document.company_id) {
+      res.status(403).json({ message: "Документ принадлежит другой компании" });
+      return;
+    }
+
+    const canWithdraw = employee.role === "admin" || document.created_by === employee.id || document.last_edited_by === employee.id;
+    if (!canWithdraw) {
+      res.status(403).json({ message: "Недостаточно прав для отзыва документа" });
+      return;
+    }
+
+    if (document.status !== "in_approval") {
+      res.status(409).json({ message: "Отозвать можно только документ в статусе 'На согласовании'" });
+      return;
+    }
+
+    await cancelPendingTasks(documentId);
+
+    await prisma.$executeRawUnsafe(
+      `
+        UPDATE approval_documents
+        SET status = ?, last_edited_by = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      "uploaded" as DocumentStatus,
+      employee.id,
+      documentId
+    );
+
+    await addApprovalDocumentEvent({
+      documentId,
+      actorId: employee.id,
+      eventType: "document_withdrawn",
+      payload: {
+        withdrawerId: employee.id
+      }
+    });
+    await del(getDocumentCacheKey(employee.companyId, documentId));
+
+    res.json({ ok: true, id: String(documentId), status: "uploaded" });
+  } catch (error) {
+    logger.error(`❌ Ошибка отзыва документа с согласования: ${error}`);
+    res.status(500).json({ message: "Ошибка отзыва документа" });
+  }
+}
+
+export async function deleteDocument(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ message: "Отсутствует токен авторизации" });
+      return;
+    }
+
+    const employee = await resolveEmployeeContextByToken(token);
+    if (!employee) {
+      res.status(401).json({ message: "Сессия не найдена" });
+      return;
+    }
+
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      res.status(400).json({ message: "Некорректный id документа" });
+      return;
+    }
+
+    const document = await getApprovalDocumentAccessRow(documentId);
+    if (!document) {
+      res.status(404).json({ message: "Документ не найден" });
+      return;
+    }
+
+    if (employee.companyId !== document.company_id) {
+      res.status(403).json({ message: "Документ принадлежит другой компании" });
+      return;
+    }
+
+    const canDelete = employee.role === "admin" || document.created_by === employee.id || document.last_edited_by === employee.id;
+    if (!canDelete) {
+      res.status(403).json({ message: "Недостаточно прав для удаления документа" });
+      return;
+    }
+
+    if (document.status === "in_approval") {
+      res.status(409).json({ message: "Сначала отзовите документ с согласования" });
+      return;
+    }
+    if (document.status === "approved") {
+      res.status(409).json({ message: "Нельзя удалить документ в статусе 'Согласован'" });
+      return;
+    }
+
+    await prisma.$executeRawUnsafe(
+      `
+        DELETE FROM approval_documents
+        WHERE id = ?
+      `,
+      documentId
+    );
+    await del(getDocumentCacheKey(employee.companyId, documentId));
+
+    res.json({ ok: true, id: String(documentId) });
+  } catch (error) {
+    logger.error(`❌ Ошибка удаления документа: ${error}`);
+    res.status(500).json({ message: "Ошибка удаления документа" });
+  }
+}
+
 export async function updateDocument(req: Request, res: Response): Promise<void> {
   try {
     await ensureApprovalDomainTables();
@@ -783,6 +921,7 @@ function formatDateTime(value: Date | string | null): string {
 function mapEventAction(eventType: string): string {
   if (eventType === "document_created") return "Документ создан";
   if (eventType === "document_submitted") return "Отправлен на согласование";
+  if (eventType === "document_withdrawn") return "Отозван с согласования";
   if (eventType === "task_approved") return "Шаг согласован";
   if (eventType === "task_rejected") return "Документ отклонен";
   if (eventType === "task_revise_requested") return "Отправлен на доработку";
