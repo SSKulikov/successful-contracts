@@ -2,7 +2,6 @@ import { createBrowserRouter } from "react-router-dom";
 import { AdminPanelPage } from "../pages/AdminPanelPage";
 import { AppLayout } from "../shared/layout/AppLayout";
 import { AuthPage } from "../pages/AuthPage";
-import { ContractsPage } from "../pages/ContractsPage";
 import { DocumentDetailsPage } from "../pages/DocumentDetailsPage";
 import { LandingPage } from "../pages/LandingPage";
 import { MyApprovalsPage } from "../pages/MyApprovalsPage";
@@ -22,8 +21,7 @@ export const appRouter = createBrowserRouter([
       { path: "documents/:id", element: <DocumentDetailsPage /> },
       { path: "my-approvals", element: <MyApprovalsPage /> },
       { path: "profile", element: <ProfilePage /> },
-      { path: "admin-panel", element: <AdminPanelPage /> },
-      { path: "contracts", element: <ContractsPage /> }
+      { path: "admin-panel", element: <AdminPanelPage /> }
     ]
   }
 ]);

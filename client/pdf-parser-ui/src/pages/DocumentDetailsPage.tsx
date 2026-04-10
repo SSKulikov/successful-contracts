@@ -1,10 +1,11 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Descriptions, List, Space, Tag, Typography, message } from "antd";
+import { Button, Card, Descriptions, Input, List, Modal, Space, Tag, Typography, message } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { approvalsApi, DocumentDetails, documentsApi } from "../shared/api";
 
 function renderStatusTag(status: DocumentDetails["status"]) {
+  if (status === "Загружен") return <Tag>{status}</Tag>;
   if (status === "На согласовании") return <Tag color="processing">{status}</Tag>;
   if (status === "На доработке") return <Tag color="warning">{status}</Tag>;
   if (status === "Отклонен") return <Tag color="error">{status}</Tag>;
@@ -12,6 +13,7 @@ function renderStatusTag(status: DocumentDetails["status"]) {
 }
 
 function renderProcessMode(status: DocumentDetails["status"] | undefined) {
+  if (status === "Загружен") return <Tag>Режим: документ загружен</Tag>;
   if (status === "На доработке") return <Tag color="warning">Режим: доработка инициатором</Tag>;
   if (status === "На согласовании") return <Tag color="processing">Режим: ожидание согласования</Tag>;
   if (status === "Согласован") return <Tag color="success">Режим: завершен (согласован)</Tag>;
@@ -38,19 +40,19 @@ export function DocumentDetailsPage() {
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
     }
   });
-  const returnMutation = useMutation({
-    mutationFn: approvalsApi.returnForRevision,
+  const rejectMutation = useMutation({
+    mutationFn: approvalsApi.reject,
     onSuccess: () => {
-      message.info("Документ отправлен на доработку");
+      message.warning("Документ отклонен");
       queryClient.invalidateQueries({ queryKey: ["document-details", id] });
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
     }
   });
-  const rejectMutation = useMutation({
-    mutationFn: approvalsApi.reject,
+  const reviseMutation = useMutation({
+    mutationFn: ({ taskId, comment }: { taskId: string; comment: string }) => approvalsApi.returnForRevision(taskId, { comment }),
     onSuccess: () => {
-      message.warning("Документ отклонен");
+      message.info("Документ отправлен на доработку");
       queryClient.invalidateQueries({ queryKey: ["document-details", id] });
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
@@ -65,13 +67,35 @@ export function DocumentDetailsPage() {
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
     }
   });
-  const actionInProgress =
-    approveMutation.isPending ||
-    returnMutation.isPending ||
-    rejectMutation.isPending ||
-    resubmitMutation.isPending;
+  const actionInProgress = approveMutation.isPending || rejectMutation.isPending || reviseMutation.isPending || resubmitMutation.isPending;
   const isFinalStatus = data?.status === "Согласован" || data?.status === "Отклонен";
   const isRevisionStatus = data?.status === "На доработке";
+  const canApproveInCard = !isRevisionStatus && !isFinalStatus && data?.canApproveCurrentStep && Boolean(data?.activeTaskId);
+
+  const handleRevise = () => {
+    if (!data?.activeTaskId) return;
+    let comment = "";
+    Modal.confirm({
+      title: "Отправить документ на доработку",
+      content: (
+        <Input.TextArea
+          autoSize={{ minRows: 3, maxRows: 6 }}
+          placeholder="Комментарий обязателен"
+          onChange={(event) => {
+            comment = event.target.value;
+          }}
+        />
+      ),
+      onOk: async () => {
+        const value = comment.trim();
+        if (!value) {
+          message.error("Комментарий обязателен");
+          throw new Error("Комментарий обязателен");
+        }
+        await reviseMutation.mutateAsync({ taskId: data.activeTaskId!, comment: value });
+      }
+    });
+  };
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -92,18 +116,22 @@ export function DocumentDetailsPage() {
               Повторно отправить на согласование
             </Button>
           </Space>
-        ) : !isFinalStatus ? (
+        ) : canApproveInCard ? (
           <Space style={{ marginBottom: 16 }} wrap>
-            <Button type="primary" disabled={actionInProgress || !id} onClick={() => approveMutation.mutate(id)}>
+            <Button type="primary" disabled={actionInProgress || !data?.activeTaskId} onClick={() => approveMutation.mutate(data.activeTaskId!)}>
               Согласовать
             </Button>
-            <Button disabled={actionInProgress || !id} onClick={() => returnMutation.mutate(id)}>
+            <Button disabled={actionInProgress || !data?.activeTaskId} onClick={handleRevise}>
               На доработку
             </Button>
-            <Button danger disabled={actionInProgress || !id} onClick={() => rejectMutation.mutate(id)}>
+            <Button danger disabled={actionInProgress || !data?.activeTaskId} onClick={() => rejectMutation.mutate(data.activeTaskId!)}>
               Отклонить
             </Button>
           </Space>
+        ) : !isFinalStatus ? (
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
+            Действия согласования выполняются из раздела "В работе".
+          </Typography.Paragraph>
         ) : (
           <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
             Документ находится в финальном статусе. Действия согласования недоступны.

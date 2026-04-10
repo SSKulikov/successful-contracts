@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export type DocumentStatus = "На согласовании" | "На доработке" | "Отклонен" | "Согласован";
+export type DocumentStatus = "Загружен" | "На согласовании" | "На доработке" | "Отклонен" | "Согласован";
 
 export type DocumentRow = {
   key: string;
@@ -10,6 +10,30 @@ export type DocumentRow = {
   initiator: string;
   amount: string;
   status: DocumentStatus;
+};
+
+export type DocumentFormPayload = {
+  type: string;
+  number: string;
+  date: string;
+  customerName: string;
+  customerInn: string;
+  executorName: string;
+  executorInn: string;
+  amount: number;
+  subject: string;
+  note?: string;
+};
+
+export type ListMyDocumentsParams = {
+  status?: DocumentStatus;
+  type?: string;
+  q?: string;
+  number?: string;
+  counterparty?: string;
+  inn?: string;
+  dateFrom?: string;
+  dateTo?: string;
 };
 
 export type DocumentHistoryItem = {
@@ -27,9 +51,21 @@ export type DocumentDetails = {
   initiator: string;
   amount: string;
   currentStep: string;
+  activeTaskId?: string | null;
+  canApproveCurrentStep?: boolean;
   createdAt: string;
   updatedAt: string;
   history: DocumentHistoryItem[];
+  fields?: {
+    number: string;
+    date: string;
+    customerName: string;
+    customerInn: string;
+    executorName: string;
+    executorInn: string;
+    subject: string;
+    note?: string | null;
+  };
 };
 
 export type ApprovalRow = {
@@ -41,6 +77,24 @@ export type ApprovalRow = {
   currentStep: string;
   receivedAt: string;
   priority: "Обычный" | "Срочно";
+  documentId?: string;
+  canTakeDecision?: boolean;
+};
+
+export type ListMyApprovalsParams = {
+  q?: string;
+  type?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export type ApprovalListResponse = {
+  items: ApprovalRow[];
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
 };
 
 export type UserProfile = {
@@ -71,7 +125,7 @@ export type RouteRow = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
-const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? "true") === "true";
+const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? "false") === "true";
 const USE_MOCK_ADMIN_API = (import.meta.env.VITE_USE_MOCK_ADMIN_API ?? "false") === "true";
 const USE_MOCK_PROFILE_API = (import.meta.env.VITE_USE_MOCK_PROFILE_API ?? "false") === "true";
 
@@ -120,6 +174,26 @@ const mockDocuments: DocumentRow[] = [
     status: "Согласован"
   }
 ];
+
+const statusToApiMap: Record<DocumentStatus, "uploaded" | "in_approval" | "revision" | "rejected" | "approved"> = {
+  Загружен: "uploaded",
+  "На согласовании": "in_approval",
+  "На доработке": "revision",
+  Отклонен: "rejected",
+  Согласован: "approved"
+};
+
+const statusFromApiMap: Record<string, DocumentStatus> = {
+  uploaded: "Загружен",
+  in_approval: "На согласовании",
+  revision: "На доработке",
+  rejected: "Отклонен",
+  approved: "Согласован"
+};
+
+function mapStatusFromApi(status: string): DocumentStatus {
+  return statusFromApiMap[status] ?? "Загружен";
+}
 
 const mockApprovals: ApprovalRow[] = [
   {
@@ -237,20 +311,48 @@ export const contractsApi = {
 };
 
 export const documentsApi = {
-  async listMyDocuments(): Promise<DocumentRow[]> {
+  async listMyDocuments(params?: ListMyDocumentsParams): Promise<DocumentRow[]> {
     if (USE_MOCK_API) return Promise.resolve(mockDocuments);
-    const response = await httpClient.get("/documents/my");
-    return response.data?.items ?? [];
+    const queryParams: Record<string, string> = {};
+    if (params?.status) queryParams.status = statusToApiMap[params.status];
+    if (params?.type) queryParams.type = params.type;
+    if (params?.q) queryParams.q = params.q;
+    if (params?.number) queryParams.number = params.number;
+    if (params?.counterparty) queryParams.counterparty = params.counterparty;
+    if (params?.inn) queryParams.inn = params.inn;
+    if (params?.dateFrom) queryParams.date_from = params.dateFrom;
+    if (params?.dateTo) queryParams.date_to = params.dateTo;
+
+    const response = await httpClient.get("/documents/my", { params: queryParams });
+    const items = (response.data?.items ?? []) as Array<{
+      id: string;
+      type: string;
+      title: string;
+      status: DocumentStatus;
+      initiator?: string;
+      counterparty?: string;
+      amount: string;
+    }>;
+
+    return items.map((item) => ({
+      key: item.id,
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      initiator: item.initiator ?? item.counterparty ?? "-",
+      amount: item.amount,
+      status: mapStatusFromApi(String(item.status))
+    }));
   },
   async exportMyDocuments(): Promise<Blob> {
     if (USE_MOCK_API) {
-      const header = "ID;Тип;Название;Инициатор;Сумма;Статус\n";
+      const header = "ID;Тип;Название;Инициатор;Сумма;Статус;Ссылка\n";
       const rows = mockDocuments
-        .map((doc) => `${doc.id};${doc.type};${doc.title};${doc.initiator};${doc.amount};${doc.status}`)
+        .map((doc) => `${doc.id};${doc.type};${doc.title};${doc.initiator};${doc.amount};${doc.status};http://localhost:5173/documents/${doc.id}`)
         .join("\n");
       return new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     }
-    const response = await httpClient.get("/documents/my/export", {
+    const response = await httpClient.get("/documents/export.xlsx", {
       responseType: "blob"
     });
     return response.data;
@@ -275,6 +377,21 @@ export const documentsApi = {
     const response = await httpClient.get(`/documents/${documentId}`);
     return response.data;
   },
+  async createDocument(payload: DocumentFormPayload) {
+    if (USE_MOCK_API) return Promise.resolve({ id: String(Date.now()), status: "uploaded" });
+    const response = await httpClient.post("/documents", payload);
+    return response.data as { id: string; status: "uploaded" };
+  },
+  async updateDocument(documentId: string, payload: Partial<DocumentFormPayload>) {
+    if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId });
+    const response = await httpClient.patch(`/documents/${documentId}`, payload);
+    return response.data as { ok: true; id: string };
+  },
+  async submitForApproval(documentId: string) {
+    if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId, status: "in_approval" });
+    const response = await httpClient.post(`/documents/${documentId}/submit`);
+    return response.data;
+  },
   async resubmitForApproval(documentId: string) {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, documentId });
     const response = await httpClient.post(`/documents/${documentId}/resubmit`);
@@ -283,19 +400,50 @@ export const documentsApi = {
 };
 
 export const approvalsApi = {
-  async listMyApprovals(): Promise<ApprovalRow[]> {
-    if (USE_MOCK_API) return Promise.resolve(mockApprovals);
-    const response = await httpClient.get("/approvals/my");
-    return response.data?.items ?? [];
+  async listMyApprovals(params?: ListMyApprovalsParams): Promise<ApprovalListResponse> {
+    if (USE_MOCK_API) {
+      const page = Math.max(1, params?.page ?? 1);
+      const pageSize = Math.max(1, params?.pageSize ?? 8);
+      const offset = (page - 1) * pageSize;
+      const pagedItems = mockApprovals.slice(offset, offset + pageSize);
+      return Promise.resolve({
+        items: pagedItems,
+        meta: {
+          page,
+          pageSize,
+          total: mockApprovals.length
+        }
+      });
+    }
+
+    const queryParams: Record<string, string | number> = {};
+    if (params?.q) queryParams.q = params.q;
+    if (params?.type) queryParams.type = params.type;
+    if (params?.page) queryParams.page = params.page;
+    if (params?.pageSize) queryParams.page_size = params.pageSize;
+
+    const response = await httpClient.get("/approvals/my", { params: queryParams });
+    const items = (response.data?.items ?? []) as Array<ApprovalRow>;
+    return {
+      items: items.map((item) => ({
+      ...item,
+      key: item.key ?? item.id
+      })),
+      meta: {
+        page: Number(response.data?.meta?.page ?? 1),
+        pageSize: Number(response.data?.meta?.pageSize ?? params?.pageSize ?? 8),
+        total: Number(response.data?.meta?.total ?? items.length)
+      }
+    };
   },
   async approve(approvalId: string) {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, approvalId });
     const response = await httpClient.post(`/approvals/${approvalId}/approve`);
     return response.data;
   },
-  async returnForRevision(approvalId: string) {
+  async returnForRevision(approvalId: string, payload: { comment: string }) {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, approvalId });
-    const response = await httpClient.post(`/approvals/${approvalId}/return`);
+    const response = await httpClient.post(`/approvals/${approvalId}/revise`, payload);
     return response.data;
   },
   async reject(approvalId: string) {

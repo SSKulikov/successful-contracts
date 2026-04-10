@@ -1,8 +1,9 @@
 import { CheckOutlined, CloseOutlined, UndoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Input, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ApprovalRow, approvalsApi } from "../shared/api";
 
 function renderPriority(priority: ApprovalRow["priority"]) {
@@ -10,56 +11,86 @@ function renderPriority(priority: ApprovalRow["priority"]) {
 }
 
 export function MyApprovalsPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
-  const [priorityFilter, setPriorityFilter] = useState<string | undefined>(undefined);
-  const { data = [], isLoading } = useQuery({
-    queryKey: ["my-approvals"],
-    queryFn: approvalsApi.listMyApprovals
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
+  const { data, isLoading } = useQuery({
+    queryKey: ["my-approvals", { search, typeFilter, page, pageSize }],
+    queryFn: () =>
+      approvalsApi.listMyApprovals({
+        q: search.trim() || undefined,
+        type: typeFilter,
+        page,
+        pageSize
+      })
   });
   const approveMutation = useMutation({
-    mutationFn: approvalsApi.approve,
-    onSuccess: (_, approvalId) => {
-      message.success(`Документ ${approvalId} согласован`);
+    mutationFn: ({ approvalId }: { approvalId: string; documentId?: string }) => approvalsApi.approve(approvalId),
+    onSuccess: (_, payload) => {
+      message.success(`Документ ${payload.approvalId} согласован`);
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      if (payload.documentId) {
+        queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
+      }
     }
   });
   const returnMutation = useMutation({
-    mutationFn: approvalsApi.returnForRevision,
-    onSuccess: (_, approvalId) => {
-      message.info(`Документ ${approvalId} отправлен на доработку`);
+    mutationFn: ({ approvalId, comment }: { approvalId: string; comment: string; documentId?: string }) =>
+      approvalsApi.returnForRevision(approvalId, { comment }),
+    onSuccess: (_, payload) => {
+      message.info(`Документ ${payload.approvalId} отправлен на доработку`);
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      if (payload.documentId) {
+        queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
+      }
     }
   });
   const rejectMutation = useMutation({
-    mutationFn: approvalsApi.reject,
-    onSuccess: (_, approvalId) => {
-      message.warning(`Документ ${approvalId} отклонен`);
+    mutationFn: ({ approvalId }: { approvalId: string; documentId?: string }) => approvalsApi.reject(approvalId),
+    onSuccess: (_, payload) => {
+      message.warning(`Документ ${payload.approvalId} отклонен`);
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      if (payload.documentId) {
+        queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
+      }
     }
   });
   const actionInProgress =
     approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
 
-  const filteredData = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return data.filter((item) => {
-      const bySearch =
-        !query ||
-        item.title.toLowerCase().includes(query) ||
-        item.id.toLowerCase().includes(query) ||
-        item.initiator.toLowerCase().includes(query);
-      const byType = !typeFilter || item.type === typeFilter;
-      const byPriority = !priorityFilter || item.priority === priorityFilter;
-      return bySearch && byType && byPriority;
+  const handleApprove = async (row: ApprovalRow) =>
+    approveMutation.mutateAsync({ approvalId: row.id, documentId: row.documentId });
+  const handleRevision = async (row: ApprovalRow) => {
+    let comment = "";
+    Modal.confirm({
+      title: `Отправить ${row.title} на доработку`,
+      content: (
+        <Input.TextArea
+          autoSize={{ minRows: 3, maxRows: 6 }}
+          placeholder="Комментарий обязателен"
+          onChange={(event) => {
+            comment = event.target.value;
+          }}
+        />
+      ),
+      onOk: async () => {
+        const value = comment.trim();
+        if (!value) {
+          message.error("Комментарий обязателен");
+          throw new Error("Комментарий обязателен");
+        }
+        await returnMutation.mutateAsync({ approvalId: row.id, comment: value, documentId: row.documentId });
+      }
     });
-  }, [data, search, typeFilter, priorityFilter]);
-
-  const handleApprove = async (row: ApprovalRow) => approveMutation.mutateAsync(row.id);
-  const handleRevision = async (row: ApprovalRow) => returnMutation.mutateAsync(row.id);
-  const handleReject = async (row: ApprovalRow) => rejectMutation.mutateAsync(row.id);
+  };
+  const handleReject = async (row: ApprovalRow) =>
+    rejectMutation.mutateAsync({ approvalId: row.id, documentId: row.documentId });
 
   const columns: ColumnsType<ApprovalRow> = [
     { title: "ID", dataIndex: "id", key: "id", width: 110 },
@@ -78,24 +109,31 @@ export function MyApprovalsPage() {
     {
       title: "Действия",
       key: "actions",
-      width: 280,
+      width: 340,
       render: (_, row) => (
         <Space>
-          <Button type="link" icon={<CheckOutlined />} disabled={actionInProgress} onClick={() => handleApprove(row)}>
-            Согласовать
+          <Button type="link" disabled={actionInProgress} onClick={() => navigate(`/documents/${row.documentId ?? row.id}`)}>
+            Открыть
           </Button>
-          <Button type="link" icon={<UndoOutlined />} disabled={actionInProgress} onClick={() => handleRevision(row)}>
-            На доработку
-          </Button>
-          <Button
-            type="link"
-            danger
-            icon={<CloseOutlined />}
-            disabled={actionInProgress}
-            onClick={() => handleReject(row)}
-          >
-            Отклонить
-          </Button>
+          {row.canTakeDecision !== false ? (
+            <>
+              <Button type="link" icon={<CheckOutlined />} disabled={actionInProgress} onClick={() => handleApprove(row)}>
+                Согласовать
+              </Button>
+              <Button type="link" icon={<UndoOutlined />} disabled={actionInProgress} onClick={() => handleRevision(row)}>
+                На доработку
+              </Button>
+              <Button
+                type="link"
+                danger
+                icon={<CloseOutlined />}
+                disabled={actionInProgress}
+                onClick={() => handleReject(row)}
+              >
+                Отклонить
+              </Button>
+            </>
+          ) : null}
         </Space>
       )
     }
@@ -105,7 +143,7 @@ export function MyApprovalsPage() {
     <div>
       <Typography.Title level={3}>В работе</Typography.Title>
       <Typography.Paragraph type="secondary">
-        Список документов, которые пришли вам на согласование по роли. Пока используются мок-данные.
+        Список задач, назначенных вам на согласование.
       </Typography.Paragraph>
 
       <Card>
@@ -115,7 +153,10 @@ export function MyApprovalsPage() {
               placeholder="Поиск по ID, документу или инициатору"
               allowClear
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
               style={{ width: 320 }}
             />
             <Select
@@ -123,7 +164,10 @@ export function MyApprovalsPage() {
               placeholder="Тип документа"
               style={{ width: 200 }}
               value={typeFilter}
-              onChange={(value) => setTypeFilter(value)}
+              onChange={(value) => {
+                setTypeFilter(value);
+                setPage(1);
+              }}
               options={[
                 { value: "Договор", label: "Договор" },
                 { value: "УПД", label: "УПД" },
@@ -131,20 +175,26 @@ export function MyApprovalsPage() {
                 { value: "Акт", label: "Акт" }
               ]}
             />
-            <Select
-              allowClear
-              placeholder="Приоритет"
-              style={{ width: 160 }}
-              value={priorityFilter}
-              onChange={(value) => setPriorityFilter(value)}
-              options={[
-                { value: "Обычный", label: "Обычный" },
-                { value: "Срочно", label: "Срочно" }
-              ]}
-            />
           </Space>
 
-          <Table columns={columns} dataSource={filteredData} loading={isLoading || actionInProgress} pagination={{ pageSize: 8 }} />
+          <Table
+            columns={columns}
+            dataSource={data?.items ?? []}
+            loading={isLoading || actionInProgress}
+            pagination={{
+              current: data?.meta.page ?? page,
+              pageSize: data?.meta.pageSize ?? pageSize,
+              total: data?.meta.total ?? 0,
+              showSizeChanger: true,
+              pageSizeOptions: [8, 16, 32],
+              onChange: (nextPage, nextPageSize) => {
+                setPage(nextPage);
+                if (nextPageSize && nextPageSize !== pageSize) {
+                  setPageSize(nextPageSize);
+                }
+              }
+            }}
+          />
         </Space>
       </Card>
     </div>
