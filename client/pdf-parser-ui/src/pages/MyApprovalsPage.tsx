@@ -1,9 +1,11 @@
 import { CheckOutlined, CloseOutlined, UndoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Empty, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MockApiBanner } from "../shared/components/MockApiBanner";
+import { getApiErrorMessage } from "../shared/utils/api-error";
 import { ApprovalRow, approvalsApi } from "../shared/api";
 
 function renderPriority(priority: ApprovalRow["priority"]) {
@@ -17,7 +19,9 @@ export function MyApprovalsPage() {
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
-  const { data, isLoading } = useQuery({
+  const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
+
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["my-approvals", { search, typeFilter, page, pageSize }],
     queryFn: () =>
       approvalsApi.listMyApprovals({
@@ -36,7 +40,8 @@ export function MyApprovalsPage() {
       if (payload.documentId) {
         queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
       }
-    }
+    },
+    onError: mutationError
   });
   const returnMutation = useMutation({
     mutationFn: ({ approvalId, comment }: { approvalId: string; comment: string; documentId?: string }) =>
@@ -48,7 +53,8 @@ export function MyApprovalsPage() {
       if (payload.documentId) {
         queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
       }
-    }
+    },
+    onError: mutationError
   });
   const rejectMutation = useMutation({
     mutationFn: ({ approvalId }: { approvalId: string; documentId?: string }) => approvalsApi.reject(approvalId),
@@ -59,7 +65,8 @@ export function MyApprovalsPage() {
       if (payload.documentId) {
         queryClient.invalidateQueries({ queryKey: ["document-details", payload.documentId] });
       }
-    }
+    },
+    onError: mutationError
   });
   const actionInProgress =
     approveMutation.isPending || returnMutation.isPending || rejectMutation.isPending;
@@ -146,6 +153,11 @@ export function MyApprovalsPage() {
         Список задач, назначенных вам на согласование.
       </Typography.Paragraph>
 
+      <MockApiBanner />
+      {isError ? (
+        <Alert type="error" showIcon message="Не удалось загрузить задачи" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} />
+      ) : null}
+
       <Card>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Space wrap>
@@ -178,9 +190,13 @@ export function MyApprovalsPage() {
           </Space>
 
           <Table
+            rowKey="id"
             columns={columns}
             dataSource={data?.items ?? []}
             loading={isLoading || actionInProgress}
+            locale={{
+              emptyText: <Empty description="Нет задач на согласование. Когда появятся новые назначения, они отобразятся здесь." />
+            }}
             pagination={{
               current: data?.meta.page ?? page,
               pageSize: data?.meta.pageSize ?? pageSize,
