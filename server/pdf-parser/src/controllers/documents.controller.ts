@@ -1,9 +1,10 @@
+import { createHash } from "crypto";
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import { logger } from "../utils/logger";
 import * as XLSX from "xlsx";
 import { EmployeeAuthContext, getBearerToken, resolveEmployeeContextByToken } from "../utils/auth-context";
-import { del, getJson, setJson } from "../cache/redis";
+import { del, getJson, invalidateMyDocumentsListCaches, setJson } from "../cache/redis";
 import {
   addApprovalDocumentEvent,
   cancelPendingTasks,
@@ -40,6 +41,8 @@ type DocumentListFilters = {
   dateFrom: string | null;
   dateTo: string | null;
 };
+type DocumentHistoryVariant = "create" | "submit" | "withdraw" | "resubmit" | "approve" | "reject" | "revise" | "update" | "other";
+
 type DocumentDetailsResponse = {
   id: string;
   type: string;
@@ -50,9 +53,13 @@ type DocumentDetailsResponse = {
   currentStep: string;
   activeTaskId: string | null;
   canApproveCurrentStep: boolean;
+  canWithdrawDocuments: boolean;
+  canDeleteDocuments: boolean;
+  canSubmitForApproval: boolean;
+  canResubmitForApproval: boolean;
   createdAt: string;
   updatedAt: string;
-  history: Array<{ id: string; date: string; action: string; author: string }>;
+  history: Array<{ id: string; date: string; action: string; author: string; variant: DocumentHistoryVariant }>;
   fields: {
     number: string;
     date: string;
@@ -96,6 +103,20 @@ function parseDocumentListFilters(query: Request["query"]): DocumentListFilters 
     dateTo: dateToRaw ? parseQueryDate(dateToRaw) : null
   };
 }
+
+/** Без фильтров списка: только видимость по роли/компании (для сводки по статусам). */
+const EMPTY_MY_DOCUMENT_LIST_FILTERS: DocumentListFilters = {
+  status: null,
+  type: null,
+  q: null,
+  number: null,
+  counterparty: null,
+  inn: null,
+  dateFromRaw: null,
+  dateToRaw: null,
+  dateFrom: null,
+  dateTo: null
+};
 
 function buildDocumentListWhere(employee: EmployeeAuthContext, filters: DocumentListFilters) {
   const conditions: string[] = [];
@@ -192,9 +213,29 @@ function parseAmount(rawAmount: unknown) {
   return Number.NaN;
 }
 
+const MY_DOCUMENTS_LIST_CACHE_TTL_SECONDS = 120;
+
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
   return `doc:${companyPart}:${documentId}`;
+}
+
+function buildMyDocumentsListCacheKey(employee: EmployeeAuthContext, filters: DocumentListFilters): string {
+  const payload = {
+    employeeId: employee.id,
+    role: employee.role,
+    status: filters.status ?? "",
+    type: filters.type ?? "",
+    q: filters.q ?? "",
+    number: filters.number ?? "",
+    counterparty: filters.counterparty ?? "",
+    inn: filters.inn ?? "",
+    dateFrom: filters.dateFrom ?? "",
+    dateTo: filters.dateTo ?? ""
+  };
+  const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 32);
+  const companyPart = employee.companyId === null ? "none" : String(employee.companyId);
+  return `my-docs:${companyPart}:${hash}`;
 }
 
 export async function createDocument(req: Request, res: Response): Promise<void> {
@@ -271,6 +312,7 @@ export async function createDocument(req: Request, res: Response): Promise<void>
       }
     });
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(employee.companyId);
 
     res.status(201).json({
       id: String(documentId),
@@ -303,6 +345,14 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
       res.status(400).json({ message: "Некорректный формат date_from/date_to. Используйте формат YYYY-MM-DD" });
       return;
     }
+
+    const listCacheKey = buildMyDocumentsListCacheKey(employee, filters);
+    const cachedList = await getJson<{ items: unknown[] }>(listCacheKey);
+    if (cachedList && Array.isArray(cachedList.items)) {
+      res.json(cachedList);
+      return;
+    }
+
     const { whereClause, values } = buildDocumentListWhere(employee, filters);
 
     const rows = await prisma.$queryRawUnsafe<
@@ -336,10 +386,63 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
       createdAt: row.created_at
     }));
 
-    res.json({ items });
+    const listPayload = { items };
+    await setJson(listCacheKey, listPayload, MY_DOCUMENTS_LIST_CACHE_TTL_SECONDS);
+    res.json(listPayload);
   } catch (error) {
     logger.error(`❌ Ошибка получения моих документов: ${error}`);
     res.status(500).json({ message: "Ошибка получения документов" });
+  }
+}
+
+/** Сводка по статусам для «Мои документы» (те же правила видимости, что у списка; без фильтров таблицы). */
+export async function getMyDocumentsStatusStats(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ message: "Отсутствует токен авторизации" });
+      return;
+    }
+
+    const employee = await resolveEmployeeContextByToken(token);
+    if (!employee) {
+      res.status(401).json({ message: "Сессия не найдена" });
+      return;
+    }
+
+    const { whereClause, values } = buildDocumentListWhere(employee, EMPTY_MY_DOCUMENT_LIST_FILTERS);
+
+    const rows = await prisma.$queryRawUnsafe<Array<{ status: DocumentStatus; cnt: bigint }>>(
+      `
+        SELECT d.status, COUNT(*) AS cnt
+        FROM approval_documents d
+        ${whereClause}
+        GROUP BY d.status
+      `,
+      ...values
+    );
+
+    const byStatus: Record<DocumentStatus, number> = {
+      uploaded: 0,
+      in_approval: 0,
+      revision: 0,
+      rejected: 0,
+      approved: 0
+    };
+
+    for (const row of rows) {
+      const key = row.status;
+      if (key in byStatus) {
+        byStatus[key as DocumentStatus] = Number(row.cnt);
+      }
+    }
+
+    res.json({ byStatus });
+  } catch (error) {
+    logger.error(`❌ Ошибка сводки по статусам документов: ${error}`);
+    res.status(500).json({ message: "Ошибка получения сводки" });
   }
 }
 
@@ -493,6 +596,7 @@ export async function submitDocument(req: Request, res: Response): Promise<void>
       }
     });
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "in_approval" });
   } catch (error) {
@@ -570,6 +674,7 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
       }
     });
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "in_approval" });
   } catch (error) {
@@ -644,6 +749,7 @@ export async function withdrawDocument(req: Request, res: Response): Promise<voi
       }
     });
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "uploaded" });
   } catch (error) {
@@ -708,6 +814,7 @@ export async function deleteDocument(req: Request, res: Response): Promise<void>
       documentId
     );
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(document.company_id);
 
     res.json({ ok: true, id: String(documentId) });
   } catch (error) {
@@ -888,6 +995,7 @@ export async function updateDocument(req: Request, res: Response): Promise<void>
       }
     });
     await del(getDocumentCacheKey(employee.companyId, documentId));
+    await invalidateMyDocumentsListCaches(document.company_id);
 
     res.json({ ok: true, id: String(documentId) });
   } catch (error) {
@@ -926,7 +1034,19 @@ function mapEventAction(eventType: string): string {
   if (eventType === "task_rejected") return "Документ отклонен";
   if (eventType === "task_revise_requested") return "Отправлен на доработку";
   if (eventType === "document_resubmitted") return "Повторно отправлен на согласование";
+  if (eventType === "document_updated") return "Документ обновлён";
   return eventType;
+}
+
+function mapHistoryVariant(eventType: string): DocumentHistoryVariant {
+  if (eventType === "document_created") return "create";
+  if (eventType === "document_submitted" || eventType === "document_resubmitted") return "submit";
+  if (eventType === "document_withdrawn") return "withdraw";
+  if (eventType === "task_approved") return "approve";
+  if (eventType === "task_rejected") return "reject";
+  if (eventType === "task_revise_requested") return "revise";
+  if (eventType === "document_updated") return "update";
+  return "other";
 }
 
 export async function getDocumentById(req: Request, res: Response): Promise<void> {
@@ -1078,8 +1198,15 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       id: String(event.id),
       date: formatDateTime(event.created_at),
       action: event.comment ? `${mapEventAction(event.event_type)}: ${event.comment}` : mapEventAction(event.event_type),
-      author: event.actor_name ?? "Удаленный пользователь"
+      author: event.actor_name ?? "Удаленный пользователь",
+      variant: mapHistoryVariant(event.event_type)
     }));
+
+    const canEditFlow = employee.role === "admin" || doc.created_by === employee.id || doc.last_edited_by === employee.id;
+    const canWithdrawDocuments = canEditFlow && doc.status === "in_approval";
+    const canDeleteDocuments = canEditFlow && doc.status !== "in_approval" && doc.status !== "approved";
+    const canSubmitForApproval = canEditFlow && doc.status === "uploaded";
+    const canResubmitForApproval = canEditFlow && doc.status === "revision";
 
     const responsePayload: DocumentDetailsResponse = {
       id: String(doc.id),
@@ -1091,6 +1218,10 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       currentStep,
       activeTaskId,
       canApproveCurrentStep,
+      canWithdrawDocuments,
+      canDeleteDocuments,
+      canSubmitForApproval,
+      canResubmitForApproval,
       createdAt: formatDateTime(doc.created_at),
       updatedAt: formatDateTime(doc.updated_at),
       history,

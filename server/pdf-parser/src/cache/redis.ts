@@ -83,3 +83,31 @@ export async function del(key: string): Promise<void> {
   }
 }
 
+/** Удаляет все ключи по шаблону (SCAN + DEL). Для инвалидации группы ключей, напр. кэш списков документов по компании. */
+export async function scanDelByPattern(pattern: string): Promise<void> {
+  const client = await connectIfNeeded();
+  if (!client) return;
+
+  try {
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await client.scan(cursor, "MATCH", pattern, "COUNT", "200");
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await client.del(...keys);
+      }
+    } while (cursor !== "0");
+  } catch (error) {
+    logger.error(`❌ Redis scanDelByPattern failed for "${pattern}": ${error}`);
+  }
+}
+
+export function getMyDocumentsListCachePattern(companyId: number | null): string {
+  const part = companyId === null ? "none" : String(companyId);
+  return `my-docs:${part}:*`;
+}
+
+export async function invalidateMyDocumentsListCaches(companyId: number | null): Promise<void> {
+  await scanDelByPattern(getMyDocumentsListCachePattern(companyId));
+}
+

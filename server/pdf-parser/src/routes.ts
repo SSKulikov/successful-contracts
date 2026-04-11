@@ -9,6 +9,7 @@ import {
   exportDocumentsXlsx,
   getDocumentById,
   listMyDocuments,
+  getMyDocumentsStatusStats,
   resubmitDocument,
   submitDocument,
   updateDocument,
@@ -30,6 +31,7 @@ router.patch("/users/me", updateMyProfile);
 router.post("/users/me/change-password", changeMyPassword);
 router.post("/documents", createDocument);
 router.get("/documents/my", listMyDocuments);
+router.get("/documents/my/stats", getMyDocumentsStatusStats);
 router.get("/documents/export.xlsx", exportDocumentsXlsx);
 router.get("/documents/:id", getDocumentById);
 router.patch("/documents/:id", updateDocument);
