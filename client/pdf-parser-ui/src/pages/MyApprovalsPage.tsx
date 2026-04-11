@@ -7,9 +7,26 @@ import { useNavigate } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
 import { getApiErrorMessage } from "../shared/utils/api-error";
 import { ApprovalRow, approvalsApi } from "../shared/api";
+import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 
 function renderPriority(priority: ApprovalRow["priority"]) {
   return priority === "Срочно" ? <Tag color="red">{priority}</Tag> : <Tag>{priority}</Tag>;
+}
+
+function formatWaitingDays(days: number): string {
+  if (days <= 0) return "Сегодня";
+  const n = Math.floor(days);
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} день`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} дня`;
+  return `${n} дней`;
+}
+
+function formatReceivedAt(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function MyApprovalsPage() {
@@ -104,8 +121,22 @@ export function MyApprovalsPage() {
     { title: "Тип", dataIndex: "type", key: "type", width: 140 },
     { title: "Документ", dataIndex: "title", key: "title" },
     { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170 },
+    { title: "Сумма", dataIndex: "amount", key: "amount", width: 130 },
+    {
+      title: "В очереди",
+      dataIndex: "waitingDays",
+      key: "waitingDays",
+      width: 120,
+      render: (days: number) => formatWaitingDays(days)
+    },
     { title: "Этап", dataIndex: "currentStep", key: "currentStep", width: 130 },
-    { title: "Получен", dataIndex: "receivedAt", key: "receivedAt", width: 160 },
+    {
+      title: "Получен",
+      dataIndex: "receivedAt",
+      key: "receivedAt",
+      width: 160,
+      render: (value: string) => formatReceivedAt(value)
+    },
     {
       title: "Приоритет",
       dataIndex: "priority",
@@ -116,7 +147,7 @@ export function MyApprovalsPage() {
     {
       title: "Действия",
       key: "actions",
-      width: 340,
+      width: 360,
       render: (_, row) => (
         <Space>
           <Button type="link" disabled={actionInProgress} onClick={() => navigate(`/documents/${row.documentId ?? row.id}`)}>
@@ -180,19 +211,23 @@ export function MyApprovalsPage() {
                 setTypeFilter(value);
                 setPage(1);
               }}
-              options={[
-                { value: "Договор", label: "Договор" },
-                { value: "УПД", label: "УПД" },
-                { value: "Счет", label: "Счет" },
-                { value: "Акт", label: "Акт" }
-              ]}
+              options={DOCUMENT_TYPE_SELECT_OPTIONS}
             />
           </Space>
 
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            Строка с <Typography.Text strong>синей полосой слева</Typography.Text> — по задаче можно вынести решение (согласовать, на доработку, отклонить). Остальные задачи доступны для просмотра.
+          </Typography.Paragraph>
+
           <Table
+            className="my-approvals-table"
             rowKey="id"
             columns={columns}
             dataSource={data?.items ?? []}
+            rowClassName={(record) =>
+              record.canTakeDecision === false ? "my-approvals-row--view-only" : "my-approvals-row--actionable"
+            }
+            scroll={{ x: 1100 }}
             loading={isLoading || actionInProgress}
             locale={{
               emptyText: <Empty description="Нет задач на согласование. Когда появятся новые назначения, они отобразятся здесь." />

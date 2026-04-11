@@ -37,6 +37,13 @@ export type ListMyDocumentsParams = {
   dateTo?: string;
 };
 
+/** Ключи статусов как в API/БД (сводка «Мои документы»). */
+export type MyDocumentsByStatusApiKey = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
+
+export type MyDocumentsByStatusStats = {
+  byStatus: Record<MyDocumentsByStatusApiKey, number>;
+};
+
 export type DocumentHistoryVariant =
   | "create"
   | "submit"
@@ -91,6 +98,10 @@ export type ApprovalRow = {
   type: string;
   title: string;
   initiator: string;
+  /** Сумма по документу (как в БД, строка). */
+  amount: string;
+  /** Полных календарных дней с даты назначения задачи (по серверной дате). */
+  waitingDays: number;
   currentStep: string;
   receivedAt: string;
   priority: "Обычный" | "Срочно";
@@ -219,9 +230,13 @@ const mockApprovals: ApprovalRow[] = [
     type: "Договор",
     title: "Договор поставки №101",
     initiator: "Иван Петров",
+    amount: "1 250 000 ₽",
+    waitingDays: 3,
     currentStep: "Финансист",
     receivedAt: "08.04.2026 10:25",
-    priority: "Срочно"
+    priority: "Срочно",
+    documentId: "DOC-101",
+    canTakeDecision: true
   },
   {
     key: "2",
@@ -229,9 +244,13 @@ const mockApprovals: ApprovalRow[] = [
     type: "УПД",
     title: "УПД №890",
     initiator: "Мария Соколова",
+    amount: "98 400 ₽",
+    waitingDays: 0,
     currentStep: "Юрист",
     receivedAt: "08.04.2026 09:40",
-    priority: "Обычный"
+    priority: "Обычный",
+    documentId: "DOC-102",
+    canTakeDecision: false
   }
 ];
 
@@ -392,15 +411,57 @@ export const documentsApi = {
       createdAt: (item as { createdAt?: string }).createdAt
     }));
   },
-  async exportMyDocuments(): Promise<Blob> {
+  async getMyDocumentsStatusStats(): Promise<MyDocumentsByStatusStats> {
     if (USE_MOCK_API) {
+      const byStatus: MyDocumentsByStatusStats["byStatus"] = {
+        uploaded: 0,
+        in_approval: 0,
+        revision: 0,
+        rejected: 0,
+        approved: 0
+      };
+      for (const doc of mockDocuments) {
+        const k = statusToApiMap[doc.status];
+        byStatus[k] += 1;
+      }
+      return { byStatus };
+    }
+    const response = await httpClient.get<MyDocumentsByStatusStats>("/documents/my/stats");
+    return response.data;
+  },
+  async exportMyDocuments(params?: ListMyDocumentsParams): Promise<Blob> {
+    if (USE_MOCK_API) {
+      let rows = mockDocuments;
+      if (params?.status) rows = rows.filter((doc) => doc.status === params.status);
+      if (params?.type) rows = rows.filter((doc) => doc.type === params.type);
+      if (params?.q) {
+        const q = params.q.trim().toLowerCase();
+        rows = rows.filter(
+          (doc) =>
+            doc.id.toLowerCase().includes(q) ||
+            doc.title.toLowerCase().includes(q) ||
+            doc.initiator.toLowerCase().includes(q) ||
+            doc.type.toLowerCase().includes(q)
+        );
+      }
       const header = "ID;Тип;Название;Инициатор;Сумма;Статус;Ссылка\n";
-      const rows = mockDocuments
+      const body = rows
         .map((doc) => `${doc.id};${doc.type};${doc.title};${doc.initiator};${doc.amount};${doc.status};http://localhost:5173/documents/${doc.id}`)
         .join("\n");
-      return new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+      return new Blob([header + body], { type: "text/csv;charset=utf-8;" });
     }
+    const queryParams: Record<string, string> = {};
+    if (params?.status) queryParams.status = statusToApiMap[params.status];
+    if (params?.type) queryParams.type = params.type;
+    if (params?.q) queryParams.q = params.q;
+    if (params?.number) queryParams.number = params.number;
+    if (params?.counterparty) queryParams.counterparty = params.counterparty;
+    if (params?.inn) queryParams.inn = params.inn;
+    if (params?.dateFrom) queryParams.date_from = params.dateFrom;
+    if (params?.dateTo) queryParams.date_to = params.dateTo;
+
     const response = await httpClient.get("/documents/export.xlsx", {
+      params: queryParams,
       responseType: "blob"
     });
     return response.data;
@@ -495,12 +556,14 @@ export const approvalsApi = {
     if (params?.pageSize) queryParams.page_size = params.pageSize;
 
     const response = await httpClient.get("/approvals/my", { params: queryParams });
-    const items = (response.data?.items ?? []) as Array<ApprovalRow>;
+    const items = (response.data?.items ?? []) as Array<Partial<ApprovalRow> & Pick<ApprovalRow, "id">>;
     return {
       items: items.map((item) => ({
-      ...item,
-      key: item.key ?? item.id
-      })),
+        ...item,
+        key: item.key ?? item.id,
+        amount: item.amount ?? "-",
+        waitingDays: typeof item.waitingDays === "number" && !Number.isNaN(item.waitingDays) ? item.waitingDays : Number(item.waitingDays ?? 0)
+      })) as ApprovalRow[],
       meta: {
         page: Number(response.data?.meta?.page ?? 1),
         pageSize: Number(response.data?.meta?.pageSize ?? params?.pageSize ?? 8),

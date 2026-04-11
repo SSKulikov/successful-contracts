@@ -3,7 +3,7 @@ import prisma from "../prisma";
 import { logger } from "../utils/logger";
 import { getBearerToken, resolveEmployeeContextByToken } from "../utils/auth-context";
 import { addApprovalDocumentEvent, ensureApprovalDomainTables } from "../services/ApprovalDomainService";
-import { del } from "../cache/redis";
+import { del, invalidateMyDocumentsListCaches } from "../cache/redis";
 
 type DecisionAction = "approve" | "reject" | "revise";
 
@@ -82,9 +82,11 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
         type: string;
         number_value: string;
         customer_name: string;
+        amount: string;
         created_at: Date;
         step_order: number;
         created_by: number;
+        waiting_days: bigint;
       }>
     >(
       `
@@ -94,9 +96,11 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
           d.type,
           d.number_value,
           d.customer_name,
+          CAST(d.amount AS CHAR) AS amount,
           t.created_at,
           t.step_order,
-          d.created_by
+          d.created_by,
+          GREATEST(0, DATEDIFF(CURDATE(), DATE(t.created_at))) AS waiting_days
         FROM approval_tasks t
         JOIN approval_documents d ON d.id = t.document_id
         ${whereClause}
@@ -115,6 +119,8 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
       type: row.type,
       title: `${row.type} №${row.number_value}`,
       initiator: row.customer_name,
+      amount: row.amount,
+      waitingDays: Number(row.waiting_days),
       currentStep: `Шаг ${row.step_order}`,
       receivedAt: row.created_at,
       priority: "Обычный",
@@ -256,6 +262,7 @@ async function completeTaskDecision(req: Request, res: Response, action: Decisio
     }
   });
   await del(getDocumentCacheKey(task.company_id, task.document_id));
+  await invalidateMyDocumentsListCaches(task.company_id);
 
   res.json({
     ok: true,

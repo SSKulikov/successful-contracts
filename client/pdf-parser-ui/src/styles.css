@@ -380,3 +380,25 @@ body {
   color: #0f172a;
   line-height: 1.5;
 }
+
+/* «В работе»: акцент на задачах, где можно вынести решение */
+.my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable > td {
+  background: rgba(22, 119, 255, 0.06);
+  border-bottom-color: #e8ecf4;
+}
+
+.my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable {
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable:hover > td {
+  background: rgba(22, 119, 255, 0.1) !important;
+}
+
+.my-approvals-table .ant-table-tbody > tr.my-approvals-row--view-only > td {
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.my-approvals-table .ant-table-tbody > tr.my-approvals-row--view-only:hover > td {
+  background: rgba(15, 23, 42, 0.04) !important;
+}

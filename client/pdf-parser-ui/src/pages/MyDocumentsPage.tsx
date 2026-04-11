@@ -1,12 +1,15 @@
 import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import dayjs from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
 import { getApiErrorMessage } from "../shared/utils/api-error";
-import { contractsApi, DocumentFormPayload, DocumentRow, documentsApi } from "../shared/api";
+import { contractsApi, DocumentFormPayload, DocumentRow, documentsApi, type ListMyDocumentsParams } from "../shared/api";
+import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
+import { MyDocumentsStatusSummary } from "./MyDocumentsStatusSummary";
 
 function renderStatusTag(status: DocumentRow["status"]) {
   if (status === "Загружен") return <Tag>{status}</Tag>;
@@ -51,6 +54,15 @@ export function MyDocumentsPage() {
         dateTo
       })
   });
+
+  const {
+    data: statusStats,
+    isLoading: statusStatsLoading,
+    isError: statusStatsError
+  } = useQuery({
+    queryKey: ["my-documents", "stats"],
+    queryFn: () => documentsApi.getMyDocumentsStatusStats()
+  });
   const saveDocumentMutation = useMutation({
     mutationFn: async (payload: DocumentFormPayload) => {
       if (editingDocumentId) {
@@ -83,8 +95,16 @@ export function MyDocumentsPage() {
     },
     onError: mutationError
   });
+  const buildListQueryParams = (): ListMyDocumentsParams => ({
+    q: debouncedSearch || undefined,
+    status: statusFilter as DocumentRow["status"] | undefined,
+    type: typeFilter,
+    dateFrom,
+    dateTo
+  });
+
   const exportMutation = useMutation({
-    mutationFn: documentsApi.exportMyDocuments,
+    mutationFn: (params: ListMyDocumentsParams) => documentsApi.exportMyDocuments(params),
     onSuccess: (blob) => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -131,6 +151,10 @@ export function MyDocumentsPage() {
     setDateFrom(undefined);
     setDateTo(undefined);
   };
+
+  const hasActiveListFilters = Boolean(
+    search.trim() || statusFilter || typeFilter || dateFrom || dateTo
+  );
 
   const handlePickFile = () => {
     fileInputRef.current?.click();
@@ -220,9 +244,7 @@ export function MyDocumentsPage() {
       dataIndex: "type",
       key: "type",
       width: 150,
-      sorter: (a, b) => sortByText(a.type, b.type),
-      filters: Array.from(new Set(data.map((item) => item.type))).map((value) => ({ text: value, value })),
-      onFilter: (value, record) => record.type === value
+      sorter: (a, b) => sortByText(a.type, b.type)
     },
     { title: "Название", dataIndex: "title", key: "title", sorter: (a, b) => sortByText(a.title, b.title) },
     { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170, sorter: (a, b) => sortByText(a.initiator, b.initiator) },
@@ -241,14 +263,6 @@ export function MyDocumentsPage() {
       key: "status",
       width: 150,
       sorter: (a, b) => sortByText(a.status, b.status),
-      filters: [
-        { text: "Загружен", value: "Загружен" },
-        { text: "На согласовании", value: "На согласовании" },
-        { text: "На доработке", value: "На доработке" },
-        { text: "Отклонен", value: "Отклонен" },
-        { text: "Согласован", value: "Согласован" }
-      ],
-      onFilter: (value, record) => record.status === value,
       render: (value: DocumentRow["status"]) => renderStatusTag(value)
     },
     {
@@ -322,6 +336,8 @@ export function MyDocumentsPage() {
         Реестр документов с серверной фильтрацией и поиском.
       </Typography.Paragraph>
 
+      <MyDocumentsStatusSummary stats={statusStats} loading={statusStatsLoading} isError={statusStatsError} />
+
       <MockApiBanner />
       {isError ? <Alert type="error" showIcon message="Не удалось загрузить список" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} /> : null}
 
@@ -355,30 +371,87 @@ export function MyDocumentsPage() {
               style={{ width: 200 }}
               value={typeFilter}
               onChange={(value) => setTypeFilter(value)}
-              options={[
-                { value: "Договор", label: "Договор" },
-                { value: "Счет на оплату", label: "Счет на оплату" },
-                { value: "Акт", label: "Акт" }
-              ]}
+              options={DOCUMENT_TYPE_SELECT_OPTIONS}
             />
             <DatePicker
               placeholder="Дата с"
               format="YYYY-MM-DD"
-              onChange={(_, dateString) => setDateFrom(typeof dateString === "string" && dateString ? dateString : undefined)}
+              value={dateFrom ? dayjs(dateFrom) : undefined}
+              onChange={(value) => setDateFrom(value ? value.format("YYYY-MM-DD") : undefined)}
             />
             <DatePicker
               placeholder="Дата по"
               format="YYYY-MM-DD"
-              onChange={(_, dateString) => setDateTo(typeof dateString === "string" && dateString ? dateString : undefined)}
+              value={dateTo ? dayjs(dateTo) : undefined}
+              onChange={(value) => setDateTo(value ? value.format("YYYY-MM-DD") : undefined)}
             />
             <Button onClick={resetFilters}>Сбросить фильтры</Button>
-            <Button icon={<DownloadOutlined />} loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
-              Выгрузить в Excel
-            </Button>
+            <Tooltip
+              title={
+                data.length === 0 && !isLoading && !isError
+                  ? "Нет строк для выгрузки при текущих фильтрах. Сбросьте фильтры или измените поиск."
+                  : "В файл попадут те же документы, что и строки таблицы ниже (поиск, статус, тип, даты). Сортировка по колонкам меняет только порядок на экране."
+              }
+            >
+              <Button
+                icon={<DownloadOutlined />}
+                loading={exportMutation.isPending}
+                disabled={!isLoading && !isError && data.length === 0}
+                onClick={() => exportMutation.mutate(buildListQueryParams())}
+              >
+                Выгрузить в Excel
+              </Button>
+            </Tooltip>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
               Создать документ
             </Button>
           </Space>
+
+          {hasActiveListFilters ? (
+            <div>
+              <Space wrap size={[8, 8]} align="center">
+                <Typography.Text type="secondary">Активные условия:</Typography.Text>
+                {search.trim() ? (
+                  <Tag
+                    closable
+                    onClose={() => {
+                      setSearch("");
+                      setDebouncedSearch("");
+                    }}
+                  >
+                    Поиск: «{search.trim()}»
+                  </Tag>
+                ) : null}
+                {statusFilter ? (
+                  <Tag closable onClose={() => setStatusFilter(undefined)}>
+                    Статус: {statusFilter}
+                  </Tag>
+                ) : null}
+                {typeFilter ? (
+                  <Tag closable onClose={() => setTypeFilter(undefined)}>
+                    Тип: {typeFilter}
+                  </Tag>
+                ) : null}
+                {dateFrom ? (
+                  <Tag closable onClose={() => setDateFrom(undefined)}>
+                    Дата документа с: {dateFrom}
+                  </Tag>
+                ) : null}
+                {dateTo ? (
+                  <Tag closable onClose={() => setDateTo(undefined)}>
+                    Дата документа по: {dateTo}
+                  </Tag>
+                ) : null}
+                <Button type="link" size="small" onClick={resetFilters} style={{ paddingInline: 4 }}>
+                  Сбросить всё
+                </Button>
+              </Space>
+            </div>
+          ) : null}
+
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+            Экспорт в Excel использует те же условия, что и список в таблице (поиск, статус, тип, даты документа). Сортировка по заголовкам колонок влияет только на отображение, не на состав файла.
+          </Typography.Paragraph>
 
           <Table
             rowKey="id"
@@ -420,15 +493,7 @@ export function MyDocumentsPage() {
         </Space>
         <Form form={form} layout="vertical">
           <Form.Item name="type" label="Тип документа" rules={[{ required: true, message: "Укажите тип документа" }]}>
-            <Select
-              options={[
-                { value: "Договор", label: "Договор" },
-                { value: "УПД", label: "УПД" },
-                { value: "Счет", label: "Счет" },
-                { value: "Акт", label: "Акт" },
-                { value: "Накладная", label: "Накладная" }
-              ]}
-            />
+            <Select options={DOCUMENT_TYPE_SELECT_OPTIONS} placeholder="Выберите тип" />
           </Form.Item>
           <Form.Item name="number" label="Номер" rules={[{ required: true, message: "Укажите номер" }]}>
             <Input />
