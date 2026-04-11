@@ -51,29 +51,47 @@ body {
 .app-content-with-sider {
   max-width: none;
   margin: 0;
+  margin-left: 280px;
+  width: calc(100% - 280px);
+  box-sizing: border-box;
+  min-height: 100vh;
 }
 
 .app-sider.ant-layout-sider {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  height: 100vh !important;
+  max-height: 100vh;
+  overflow: hidden;
+  z-index: 100;
   background: #fff;
   border-right: 1px solid #eef0f5;
 }
 
 .app-sider-inner {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-side-menu {
   border-inline-end: 0 !important;
   padding-top: 12px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .app-sider-logout {
+  flex-shrink: 0;
   padding: 12px;
   border-top: 1px solid #eef0f5;
   background: #fff;
+  box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06);
 }
 
 .landing {
@@ -266,9 +284,99 @@ body {
   }
 
   .app-sider.ant-layout-sider {
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    height: auto !important;
+    max-height: none;
+    overflow: visible;
+    z-index: auto;
     width: 100% !important;
     min-width: 100% !important;
     max-width: 100% !important;
     flex: 0 0 100% !important;
   }
+
+  .app-sider-inner {
+    min-height: 0;
+    height: auto;
+    overflow: visible;
+  }
+
+  .app-side-menu {
+    overflow-y: visible;
+  }
+
+  .app-content-with-sider {
+    margin-left: 0;
+    width: 100%;
+    min-height: 0;
+  }
+}
+
+/* Карточка документа: статус, этап, история */
+.doc-detail-card.ant-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  border: 1px solid #e8ecf4;
+}
+
+.doc-detail-hero {
+  padding: 4px 0 0;
+}
+
+.doc-detail-status.doc-detail-status--lg.ant-tag {
+  font-size: 14px;
+  padding: 6px 14px;
+  margin: 0;
+  border-radius: 999px;
+  line-height: 1.35;
+}
+
+.doc-detail-step-label {
+  font-size: 15px;
+  color: #1e293b;
+}
+
+.doc-detail-steps.ant-steps {
+  margin-top: 8px;
+}
+
+.doc-detail-steps .ant-steps-item-title {
+  font-size: 13px !important;
+}
+
+.doc-detail-steps .ant-steps-item-description {
+  font-size: 12px !important;
+  color: #64748b !important;
+}
+
+.doc-detail-history-card .ant-timeline {
+  margin-top: 8px;
+}
+
+.doc-detail-timeline__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+  max-width: 160px;
+}
+
+.doc-detail-timeline__date {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.doc-detail-timeline__author {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 500;
+}
+
+.doc-detail-timeline__action {
+  font-size: 14px;
+  color: #0f172a;
+  line-height: 1.5;
 }

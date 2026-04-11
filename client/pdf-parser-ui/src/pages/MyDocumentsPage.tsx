@@ -1,9 +1,11 @@
 import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MockApiBanner } from "../shared/components/MockApiBanner";
+import { getApiErrorMessage } from "../shared/utils/api-error";
 import { contractsApi, DocumentFormPayload, DocumentRow, documentsApi } from "../shared/api";
 
 function renderStatusTag(status: DocumentRow["status"]) {
@@ -36,7 +38,9 @@ export function MyDocumentsPage() {
     return () => window.clearTimeout(timeoutId);
   }, [search]);
 
-  const { data = [], isLoading } = useQuery({
+  const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
+
+  const { data = [], isLoading, isError, error } = useQuery({
     queryKey: ["my-documents", { search: debouncedSearch, statusFilter, typeFilter, dateFrom, dateTo }],
     queryFn: () =>
       documentsApi.listMyDocuments({
@@ -60,21 +64,24 @@ export function MyDocumentsPage() {
       setEditingDocumentId(null);
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
-    }
+    },
+    onError: mutationError
   });
   const submitMutation = useMutation({
     mutationFn: documentsApi.submitForApproval,
     onSuccess: () => {
       message.success("Документ отправлен на согласование");
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
-    }
+    },
+    onError: mutationError
   });
   const resubmitMutation = useMutation({
     mutationFn: documentsApi.resubmitForApproval,
     onSuccess: () => {
       message.success("Документ повторно отправлен на согласование");
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
-    }
+    },
+    onError: mutationError
   });
   const exportMutation = useMutation({
     mutationFn: documentsApi.exportMyDocuments,
@@ -88,7 +95,8 @@ export function MyDocumentsPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
       message.success("Экспорт подготовлен");
-    }
+    },
+    onError: mutationError
   });
   const withdrawMutation = useMutation({
     mutationFn: documentsApi.withdrawFromApproval,
@@ -96,7 +104,8 @@ export function MyDocumentsPage() {
       message.success("Документ отозван с согласования");
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
-    }
+    },
+    onError: mutationError
   });
   const deleteMutation = useMutation({
     mutationFn: documentsApi.deleteDocument,
@@ -104,7 +113,8 @@ export function MyDocumentsPage() {
       message.success("Документ удален");
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
       queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
-    }
+    },
+    onError: mutationError
   });
 
   const openCreateModal = () => {
@@ -185,8 +195,8 @@ export function MyDocumentsPage() {
         note: details.fields?.note ?? ""
       });
       setIsModalOpen(true);
-    } catch {
-      message.error("Не удалось загрузить документ для редактирования");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Не удалось загрузить документ для редактирования"));
     }
   };
 
@@ -312,6 +322,9 @@ export function MyDocumentsPage() {
         Реестр документов с серверной фильтрацией и поиском.
       </Typography.Paragraph>
 
+      <MockApiBanner />
+      {isError ? <Alert type="error" showIcon message="Не удалось загрузить список" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} /> : null}
+
       <Card>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Space wrap>
@@ -368,10 +381,20 @@ export function MyDocumentsPage() {
           </Space>
 
           <Table
+            rowKey="id"
             columns={columns}
             dataSource={data}
             loading={isLoading}
             pagination={{ pageSize: 8 }}
+            locale={{
+              emptyText: (
+                <Empty description="Нет документов по выбранным условиям">
+                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+                    Создать документ
+                  </Button>
+                </Empty>
+              )
+            }}
           />
         </Space>
       </Card>

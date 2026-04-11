@@ -37,11 +37,23 @@ export type ListMyDocumentsParams = {
   dateTo?: string;
 };
 
+export type DocumentHistoryVariant =
+  | "create"
+  | "submit"
+  | "withdraw"
+  | "resubmit"
+  | "approve"
+  | "reject"
+  | "revise"
+  | "update"
+  | "other";
+
 export type DocumentHistoryItem = {
   id: string;
   date: string;
   action: string;
   author: string;
+  variant?: DocumentHistoryVariant;
 };
 
 export type DocumentDetails = {
@@ -54,6 +66,10 @@ export type DocumentDetails = {
   currentStep: string;
   activeTaskId?: string | null;
   canApproveCurrentStep?: boolean;
+  canWithdrawDocuments?: boolean;
+  canDeleteDocuments?: boolean;
+  canSubmitForApproval?: boolean;
+  canResubmitForApproval?: boolean;
   createdAt: string;
   updatedAt: string;
   history: DocumentHistoryItem[];
@@ -228,12 +244,28 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
     initiator: "Иван Петров",
     amount: "1 250 000 ₽",
     currentStep: "Финансист",
+    canWithdrawDocuments: true,
+    canDeleteDocuments: false,
+    canSubmitForApproval: false,
+    canResubmitForApproval: false,
+    canApproveCurrentStep: true,
+    activeTaskId: "1",
     createdAt: "06.04.2026 11:10",
     updatedAt: "08.04.2026 10:25",
+    fields: {
+      number: "101",
+      date: "2026-04-01",
+      customerName: "ООО Заказчик",
+      customerInn: "7700000000",
+      executorName: "ООО Исполнитель",
+      executorInn: "7800000000",
+      subject: "Поставка оборудования",
+      note: null
+    },
     history: [
-      { id: "h1", date: "06.04.2026 11:10", action: "Документ создан", author: "Иван Петров" },
-      { id: "h2", date: "06.04.2026 12:00", action: "Отправлен на согласование", author: "Иван Петров" },
-      { id: "h3", date: "07.04.2026 15:20", action: "Согласовано этапом Юрист", author: "Мария Соколова" }
+      { id: "h1", date: "06.04.2026 11:10", action: "Документ создан", author: "Иван Петров", variant: "create" },
+      { id: "h2", date: "06.04.2026 12:00", action: "Отправлен на согласование", author: "Иван Петров", variant: "submit" },
+      { id: "h3", date: "07.04.2026 15:20", action: "Шаг согласован", author: "Мария Соколова", variant: "approve" }
     ]
   },
   "DOC-102": {
@@ -244,12 +276,26 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
     initiator: "Иван Петров",
     amount: "320 000 ₽",
     currentStep: "Инициатор",
+    canWithdrawDocuments: false,
+    canDeleteDocuments: true,
+    canSubmitForApproval: false,
+    canResubmitForApproval: true,
     createdAt: "05.04.2026 09:30",
     updatedAt: "08.04.2026 09:40",
+    fields: {
+      number: "44",
+      date: "2026-04-05",
+      customerName: "Иван Петров",
+      customerInn: "7700000001",
+      executorName: "ООО Поставщик",
+      executorInn: "7700000002",
+      subject: "Оплата по договору",
+      note: "Уточнить НДС"
+    },
     history: [
-      { id: "h1", date: "05.04.2026 09:30", action: "Документ создан", author: "Иван Петров" },
-      { id: "h2", date: "05.04.2026 09:50", action: "Отправлен на согласование", author: "Иван Петров" },
-      { id: "h3", date: "08.04.2026 09:40", action: "Возвращен на доработку", author: "Мария Соколова" }
+      { id: "h1", date: "05.04.2026 09:30", action: "Документ создан", author: "Иван Петров", variant: "create" },
+      { id: "h2", date: "05.04.2026 09:50", action: "Отправлен на согласование", author: "Иван Петров", variant: "submit" },
+      { id: "h3", date: "08.04.2026 09:40", action: "Отправлен на доработку: уточнить реквизиты", author: "Мария Соколова", variant: "revise" }
     ]
   }
 };
@@ -370,8 +416,22 @@ export const documentsApi = {
           initiator: "Неизвестно",
           amount: "-",
           currentStep: "Не назначен",
+          canWithdrawDocuments: true,
+          canDeleteDocuments: false,
+          canSubmitForApproval: false,
+          canResubmitForApproval: false,
           createdAt: "-",
           updatedAt: "-",
+          fields: {
+            number: "-",
+            date: "-",
+            customerName: "-",
+            customerInn: "-",
+            executorName: "-",
+            executorInn: "-",
+            subject: "-",
+            note: null
+          },
           history: []
         }
       );
