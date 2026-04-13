@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import prisma from "../prisma";
 import { ensureEmployeesTable, generateOneTimePassword } from "./admin.controller";
 import { logger } from "../utils/logger";
+import { companyAdminRoleSqlCondition, countCompanyAdminsTx } from "../utils/company-roles";
 
 type CompanyListRow = {
   id: number;
@@ -11,9 +12,27 @@ type CompanyListRow = {
   admin_employee_id: number | null;
 };
 
-function adminRoleCondition(alias = "") {
-  const p = alias ? `${alias}.` : "";
-  return `JSON_CONTAINS(CAST(${p}roles_json AS JSON), '"admin"', '$')`;
+/** Prisma часто кладёт текст MySQL в `cause`; без этого `Duplicate entry` не попадает в `message`. */
+function getFullErrorText(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  for (let depth = 0; current != null && depth < 8; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    if (typeof current === "string") {
+      parts.push(current);
+      break;
+    }
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = (current as Error & { cause?: unknown }).cause;
+      continue;
+    }
+    parts.push(String(current));
+    break;
+  }
+  return parts.join(" ");
 }
 
 export async function listCompanies(req: Request, res: Response): Promise<void> {
@@ -29,14 +48,14 @@ export async function listCompanies(req: Request, res: Response): Promise<void> 
         (
           SELECT e.full_name
           FROM employees e
-          WHERE e.company_id = c.id AND ${adminRoleCondition("e")}
+          WHERE e.company_id = c.id AND ${companyAdminRoleSqlCondition("e")}
           ORDER BY e.id ASC
           LIMIT 1
         ) AS admin_full_name,
         (
           SELECT e.id
           FROM employees e
-          WHERE e.company_id = c.id AND ${adminRoleCondition("e")}
+          WHERE e.company_id = c.id AND ${companyAdminRoleSqlCondition("e")}
           ORDER BY e.id ASC
           LIMIT 1
         ) AS admin_employee_id
@@ -91,6 +110,27 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const dupEmailRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+      `SELECT COUNT(*) AS c FROM employees WHERE email = ?`,
+      email
+    );
+    if (Number(dupEmailRows[0]?.c ?? 0) > 0) {
+      res.status(409).json({
+        message:
+          "Этот email уже зарегистрирован. Войдите на странице входа с тем же email и паролем; повторная регистрация компании не нужна."
+      });
+      return;
+    }
+
+    const dupInnRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+      `SELECT COUNT(*) AS c FROM companies WHERE inn = ?`,
+      inn
+    );
+    if (Number(dupInnRows[0]?.c ?? 0) > 0) {
+      res.status(409).json({ message: "Компания с таким ИНН уже зарегистрирована" });
+      return;
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`INSERT INTO companies (name, inn) VALUES (?, ?)`, companyName, inn);
 
@@ -98,6 +138,10 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
       const companyId = Number(inserted[0]?.id ?? 0);
       if (!companyId) {
         throw new Error("Не удалось получить id компании");
+      }
+
+      if ((await countCompanyAdminsTx(tx, companyId)) > 0) {
+        throw new Error("COMPANY_ALREADY_HAS_ADMIN");
       }
 
       await tx.$executeRawUnsafe(
@@ -115,21 +159,30 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
         "Активен",
         companyId
       );
+
+      if ((await countCompanyAdminsTx(tx, companyId)) !== 1) {
+        throw new Error("COMPANY_ADMIN_COUNT_INVALID");
+      }
     });
 
     logger.info(`✅ Зарегистрирована компания: ${inn}`);
     res.status(201).json({ message: "Компания зарегистрирована" });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getFullErrorText(error);
     logger.error(`❌ Ошибка регистрации компании: ${message}`);
 
-    if (message.includes("Duplicate entry") && message.includes("inn")) {
-      res.status(409).json({ message: "Компания с таким ИНН уже зарегистрирована" });
-      return;
-    }
-    if (message.includes("Duplicate entry") && message.includes("email")) {
-      res.status(409).json({ message: "Пользователь с таким email уже существует" });
-      return;
+    if (/Duplicate entry/i.test(message)) {
+      if (/employees\.email/i.test(message) || /for key 'employees\.email'/i.test(message)) {
+        res.status(409).json({
+          message:
+            "Этот email уже зарегистрирован. Войдите на странице входа с тем же email и паролем; повторная регистрация компании не нужна."
+        });
+        return;
+      }
+      if (/companies\.inn/i.test(message) || (/inn/i.test(message) && /companies/i.test(message))) {
+        res.status(409).json({ message: "Компания с таким ИНН уже зарегистрирована" });
+        return;
+      }
     }
 
     res.status(500).json({
@@ -184,13 +237,32 @@ export async function updateCompany(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const adminCountRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}`,
+      id
+    );
+    const adminCount = Number(adminCountRows[0]?.c ?? 0);
+    if (adminCount === 0) {
+      res.status(422).json({
+        message: "У компании не найден администратор. Зарегистрируйте компанию заново или обратитесь в поддержку."
+      });
+      return;
+    }
+    if (adminCount > 1) {
+      res.status(409).json({
+        message:
+          "В компании несколько администраторов — нарушение правил. Устраните дубликаты в базе или обратитесь в поддержку."
+      });
+      return;
+    }
+
     await prisma.$executeRawUnsafe(`UPDATE companies SET name = ?, inn = ? WHERE id = ?`, companyName, inn, id);
 
     await prisma.$executeRawUnsafe(
       `
       UPDATE employees
       SET full_name = ?
-      WHERE company_id = ? AND ${adminRoleCondition()}
+      WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}
       LIMIT 1
       `,
       adminFullName,
@@ -259,7 +331,8 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
     const adminRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
       `
       SELECT id FROM employees
-      WHERE company_id = ? AND ${adminRoleCondition()}
+      WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}
+      ORDER BY id ASC
       LIMIT 1
       `,
       id
@@ -269,14 +342,26 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
       return;
     }
 
+    const adminCountRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}`,
+      id
+    );
+    if (Number(adminCountRows[0]?.c ?? 0) > 1) {
+      res.status(409).json({
+        message:
+          "В компании несколько администраторов — сброс пароля недоступен. Устраните дубликаты в базе или обратитесь в поддержку."
+      });
+      return;
+    }
+
     await prisma.$executeRawUnsafe(
       `
       UPDATE employees
       SET password_value = ?, is_temporary_password = 1
-      WHERE company_id = ? AND ${adminRoleCondition()}
+      WHERE id = ?
       `,
       oneTimePassword,
-      id
+      adminRows[0].id
     );
 
     logger.info(`✅ Сброшен пароль администратора компании id=${id}`);

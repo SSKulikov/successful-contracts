@@ -1,5 +1,7 @@
 import { Badge, Button, Card, Space, Tabs, Typography } from "antd";
-import { useNavigate } from "react-router-dom";
+import { useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
 
 const mockApprovals = [
   { id: "APP-11", title: "Договор поставки №101", initiator: "Иван Петров", step: "Финансист" },
@@ -8,6 +10,11 @@ const mockApprovals = [
 
 export function WorkspacePage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const showAdminTab = useMemo(() => {
+    const user = getStoredUserProfile();
+    return user ? isPlatformAdminUser(user) : false;
+  }, [location.pathname]);
 
   const items = [
     {
@@ -62,22 +69,26 @@ export function WorkspacePage() {
         </Card>
       )
     },
-    {
-      key: "admin-panel",
-      label: "Админ-панель",
-      children: (
-        <Card>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Typography.Text type="secondary">
-              Для администратора доступно управление сотрудниками и маршрутами согласования.
-            </Typography.Text>
-            <Button type="primary" onClick={() => navigate("/admin-panel")}>
-              Перейти в админ-панель
-            </Button>
-          </Space>
-        </Card>
-      )
-    }
+    ...(showAdminTab
+      ? [
+          {
+            key: "admin-panel",
+            label: "Админ-панель",
+            children: (
+              <Card>
+                <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                  <Typography.Text type="secondary">
+                    Для платформенного администратора: управление компаниями и сотрудниками.
+                  </Typography.Text>
+                  <Button type="primary" onClick={() => navigate("/admin-panel")}>
+                    Перейти в админ-панель
+                  </Button>
+                </Space>
+              </Card>
+            )
+          }
+        ]
+      : [])
   ];
 
   return (

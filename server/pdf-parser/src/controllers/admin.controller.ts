@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import { logger } from "../utils/logger";
+import { countCompanyAdminsTx, lockCompanyRowForUpdate } from "../utils/company-roles";
 
 type CreateEmployeeBody = {
   fullName?: string;
@@ -20,6 +21,10 @@ type EmployeeRow = {
   status: "Активен" | "Неактивен";
   created_at: Date;
 };
+
+function rolesIncludeCompanyAdmin(roles: string[]): boolean {
+  return roles.some((r) => r === "admin");
+}
 
 export function generateOneTimePassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -123,13 +128,22 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       return;
     }
 
+    if (rolesIncludeCompanyAdmin(roles) && companyId === null) {
+      res.status(400).json({
+        message:
+          "Роль администратора компании (admin) можно назначить только вместе с companyId. Платформенных администраторов создаёт только система."
+      });
+      return;
+    }
+
     const oneTimePassword =
       typeof body.oneTimePassword === "string" && body.oneTimePassword.trim()
         ? body.oneTimePassword.trim()
         : generateOneTimePassword();
 
-    await prisma.$executeRawUnsafe(
-      "INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    const insertSql =
+      "INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    const insertParams = [
       fullName,
       email,
       position,
@@ -138,7 +152,33 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       1,
       "Активен",
       companyId
-    );
+    ] as const;
+
+    if (companyId !== null) {
+      const companyExists = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+        `SELECT id FROM companies WHERE id = ? LIMIT 1`,
+        companyId
+      );
+      if (!companyExists[0]) {
+        res.status(404).json({ message: "Компания не найдена" });
+        return;
+      }
+    }
+
+    if (companyId !== null && rolesIncludeCompanyAdmin(roles)) {
+      await prisma.$transaction(async (tx) => {
+        const locked = await lockCompanyRowForUpdate(tx, companyId);
+        if (!locked) {
+          throw new Error("COMPANY_NOT_FOUND");
+        }
+        if ((await countCompanyAdminsTx(tx, companyId)) >= 1) {
+          throw new Error("COMPANY_ADMIN_EXISTS");
+        }
+        await tx.$executeRawUnsafe(insertSql, ...insertParams);
+      });
+    } else {
+      await prisma.$executeRawUnsafe(insertSql, ...insertParams);
+    }
 
     logger.info(`✅ Создан сотрудник: ${email}`);
     res.status(201).json({
@@ -155,6 +195,17 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`❌ Ошибка создания сотрудника: ${message}`);
+
+    if (message.includes("COMPANY_ADMIN_EXISTS")) {
+      res.status(409).json({
+        message: "В этой компании уже есть администратор. У компании может быть только один администратор."
+      });
+      return;
+    }
+    if (message.includes("COMPANY_NOT_FOUND")) {
+      res.status(404).json({ message: "Компания не найдена" });
+      return;
+    }
 
     if (message.includes("Duplicate entry")) {
       res.status(409).json({ message: "Сотрудник с таким email уже существует" });

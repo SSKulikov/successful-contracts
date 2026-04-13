@@ -1,31 +1,32 @@
 import { LockOutlined, MailOutlined, UserOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar, Button, Card, Form, Input, Space, Typography, message } from "antd";
-import { AUTH_USER_STORAGE_KEY, USER_ROLE_STORAGE_KEY, profileApi } from "../shared/api";
+import {
+  AUTH_TOKEN_STORAGE_KEY,
+  AUTH_USER_STORAGE_KEY,
+  USER_ROLE_STORAGE_KEY,
+  UserProfile,
+  profileApi
+} from "../shared/api";
 
 export function ProfilePage() {
   const [profileForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
   const queryClient = useQueryClient();
   const storedUserRaw = localStorage.getItem(AUTH_USER_STORAGE_KEY);
-  const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
-  const role = localStorage.getItem(USER_ROLE_STORAGE_KEY) === "admin" ? "admin" : "employee";
+  const storedUser = storedUserRaw ? (JSON.parse(storedUserRaw) as UserProfile | null) : null;
   const { data: profile, isLoading } = useQuery({
     queryKey: ["my-profile"],
     queryFn: profileApi.getMyProfile,
-    enabled: role === "employee"
+    enabled: Boolean(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY))
   });
   const updateProfileMutation = useMutation({
     mutationFn: profileApi.updateMyProfile,
     onSuccess: (updatedProfile) => {
-      localStorage.setItem(
-        AUTH_USER_STORAGE_KEY,
-        JSON.stringify({
-          ...storedUser,
-          ...updatedProfile,
-          role
-        })
-      );
+      localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(updatedProfile));
+      if (updatedProfile.role) {
+        localStorage.setItem(USER_ROLE_STORAGE_KEY, updatedProfile.role);
+      }
       message.success("Профиль обновлен");
       queryClient.invalidateQueries({ queryKey: ["my-profile"] });
     },
@@ -80,6 +81,11 @@ export function ProfilePage() {
                 {currentProfile?.fullName ?? "Пользователь"}
               </Typography.Title>
               <Typography.Text type="secondary">{currentProfile?.roleLabel ?? "Сотрудник"}</Typography.Text>
+              {currentProfile?.companyId != null ? (
+                <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                  Компания (ID): {currentProfile.companyId}
+                </Typography.Paragraph>
+              ) : null}
             </div>
           </Space>
 

@@ -24,19 +24,20 @@ import {
 } from "./controllers/documents.controller";
 import { approveTask, listMyApprovals, rejectTask, reviseTask } from "./controllers/approvals.controller";
 import { getHealth } from "./controllers/health.controller";
+import { requirePlatformAdmin } from "./middleware/requirePlatformAdmin";
 
 const router = Router();
 
 router.get("/health", getHealth);
 router.post("/parse-file", parseFile);
 router.post("/save-data-info", saveData);
-router.get("/admin/employees", listEmployees);
-router.post("/admin/employees", createEmployee);
-router.get("/admin/companies", listCompanies);
-router.post("/admin/companies", createCompany);
-router.patch("/admin/companies/:id", updateCompany);
-router.delete("/admin/companies/:id", deleteCompany);
-router.post("/admin/companies/:id/reset-admin", resetCompanyAdmin);
+router.get("/admin/employees", requirePlatformAdmin, listEmployees);
+router.post("/admin/employees", requirePlatformAdmin, createEmployee);
+router.get("/admin/companies", requirePlatformAdmin, listCompanies);
+router.post("/admin/companies", requirePlatformAdmin, createCompany);
+router.patch("/admin/companies/:id", requirePlatformAdmin, updateCompany);
+router.delete("/admin/companies/:id", requirePlatformAdmin, deleteCompany);
+router.post("/admin/companies/:id/reset-admin", requirePlatformAdmin, resetCompanyAdmin);
 router.post("/auth/login", login);
 router.get("/users/me", getMyProfile);
 router.patch("/users/me", updateMyProfile);

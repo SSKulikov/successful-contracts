@@ -25,11 +25,8 @@ export function AuthPage() {
       try {
         const response = await authApi.login({ email: PLATFORM_DEMO_ADMIN_EMAIL, password: ADMIN_PASSWORD });
         localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, response.token);
-        localStorage.setItem(USER_ROLE_STORAGE_KEY, "admin");
-        localStorage.setItem(
-          AUTH_USER_STORAGE_KEY,
-          JSON.stringify({ ...response.user, role: "admin" as const })
-        );
+        localStorage.setItem(USER_ROLE_STORAGE_KEY, response.user.role);
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(response.user));
         navigate("/admin-panel");
       } catch {
         message.error(
@@ -42,11 +39,8 @@ export function AuthPage() {
     try {
       const response = await authApi.login({ email: login, password });
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, response.token);
-      localStorage.setItem(USER_ROLE_STORAGE_KEY, "employee");
-      localStorage.setItem(
-        AUTH_USER_STORAGE_KEY,
-        JSON.stringify({ ...response.user, role: "employee" })
-      );
+      localStorage.setItem(USER_ROLE_STORAGE_KEY, response.user.role);
+      localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(response.user));
       if (response.isTemporaryPassword) {
         message.warning("Вы вошли по одноразовому паролю. Пожалуйста, смените пароль в профиле.");
       }
@@ -78,8 +72,9 @@ export function AuthPage() {
           Войти
         </Button>
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          Демо-админ: логин <code>admin</code>, пароль <code>111</code> — запрашивает сессию у API (учётная запись
-          платформенного админа). Сотрудник: email + одноразовый пароль из админ-панели.
+          Демо-админ: логин <code>admin</code>, пароль <code>111</code> — платформенный администратор (регистрация
+          компаний и глобальный список сотрудников только у этой учётки). Сотрудник: email + пароль из администратора
+          компании.
         </Typography.Paragraph>
       </Form>
     </Card>

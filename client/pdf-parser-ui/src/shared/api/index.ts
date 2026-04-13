@@ -125,16 +125,42 @@ export type ApprovalListResponse = {
   };
 };
 
+/** DTO пользователя: login, GET/PATCH /users/me */
 export type UserProfile = {
   fullName: string;
   email: string;
   roleLabel: string;
   position?: string;
-};
-
-export type AuthUser = UserProfile & {
+  /** ID компании (tenant); `null` у платформенного админа или без привязки */
+  companyId: number | null;
+  /** Роль в приложении: администратор компании/платформы или сотрудник */
   role: "admin" | "employee";
 };
+
+export type AuthUser = UserProfile;
+
+/** Управление компаниями и глобальным списком сотрудников в API — только при `companyId === null`. */
+export function isPlatformAdminUser(user: Pick<UserProfile, "role" | "companyId">): boolean {
+  return user.role === "admin" && user.companyId == null;
+}
+
+export function getStoredUserProfile(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(AUTH_USER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UserProfile;
+    if (
+      parsed &&
+      typeof parsed.email === "string" &&
+      (parsed.role === "admin" || parsed.role === "employee")
+    ) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export type EmployeeRow = {
   key: string;
@@ -333,7 +359,9 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
 const mockProfile: UserProfile = {
   fullName: "Иван Петров",
   email: "demo@company.ru",
-  roleLabel: "Сотрудник"
+  roleLabel: "Сотрудник",
+  companyId: 1,
+  role: "employee"
 };
 
 const mockEmployees: EmployeeRow[] = [
@@ -639,7 +667,14 @@ export const adminApi = {
     const response = await httpClient.get("/admin/employees");
     return response.data?.items ?? [];
   },
-  async createEmployee(payload: { fullName: string; email: string; position: string; roles: string[]; oneTimePassword?: string }) {
+  async createEmployee(payload: {
+    fullName: string;
+    email: string;
+    position: string;
+    roles: string[];
+    oneTimePassword?: string;
+    companyId?: number;
+  }) {
     if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ id: "mock-new-employee", ...payload });
     const response = await httpClient.post("/admin/employees", payload);
     return response.data;

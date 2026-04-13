@@ -1,22 +1,25 @@
 import { Button, Layout, Menu, Typography } from "antd";
 import { useMemo } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, USER_ROLE_STORAGE_KEY } from "../api";
+import {
+  AUTH_TOKEN_STORAGE_KEY,
+  AUTH_USER_STORAGE_KEY,
+  USER_ROLE_STORAGE_KEY,
+  getStoredUserProfile,
+  isPlatformAdminUser
+} from "../api";
 
 const { Header, Content, Sider } = Layout;
-
-type AppRole = "admin" | "employee";
 
 export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const role = (localStorage.getItem(USER_ROLE_STORAGE_KEY) === "admin" ? "admin" : "employee") as AppRole;
 
   const hideSidebar = location.pathname === "/" || location.pathname === "/auth";
   const showHeader = hideSidebar;
   const selectedKey = location.pathname;
 
-  const adminMenuItems = useMemo(
+  const platformMenuItems = useMemo(
     () => [
       { key: "/profile", label: "Профиль" },
       { key: "/admin-panel", label: "Админ панель" },
@@ -26,7 +29,7 @@ export function AppLayout() {
     []
   );
 
-  const employeeMenuItems = useMemo(
+  const tenantMenuItems = useMemo(
     () => [
       { key: "/profile", label: "Профиль" },
       { key: "/my-documents", label: "Мои документы" },
@@ -35,7 +38,8 @@ export function AppLayout() {
     []
   );
 
-  const menuItems = role === "admin" ? adminMenuItems : employeeMenuItems;
+  const user = getStoredUserProfile();
+  const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
 
   const handleLogout = () => {
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);

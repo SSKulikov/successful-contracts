@@ -4,7 +4,14 @@ import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tab
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { USER_ROLE_STORAGE_KEY, RegisteredCompanyRow, adminApi, EmployeeRow, RouteRow } from "../shared/api";
+import {
+  RegisteredCompanyRow,
+  adminApi,
+  EmployeeRow,
+  RouteRow,
+  getStoredUserProfile,
+  isPlatformAdminUser
+} from "../shared/api";
 
 function generateOneTimePassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -23,8 +30,9 @@ export function AdminPanelPage() {
   const [lastIssuedPassword, setLastIssuedPassword] = useState<string | null>(null);
 
   useEffect(() => {
-    if (localStorage.getItem(USER_ROLE_STORAGE_KEY) !== "admin") {
-      message.warning("Раздел доступен только администратору");
+    const user = getStoredUserProfile();
+    if (!user || !isPlatformAdminUser(user)) {
+      message.warning("Раздел доступен только платформенному администратору");
       navigate("/", { replace: true });
     }
   }, [navigate]);
@@ -44,6 +52,13 @@ export function AdminPanelPage() {
   });
   const createEmployeeMutation = useMutation({
     mutationFn: adminApi.createEmployee,
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
+          ? (err.response as { data?: { message?: string } }).data?.message
+          : undefined;
+      message.error(msg ?? "Не удалось создать сотрудника");
+    },
     onSuccess: (response: { oneTimePassword?: string }) => {
       message.success("Сотрудник добавлен");
       if (response?.oneTimePassword) {
@@ -235,8 +250,12 @@ export function AdminPanelPage() {
   const handleCreateEmployee = async () => {
     const values = await employeeForm.validateFields();
     await createEmployeeMutation.mutateAsync({
-      ...values,
-      oneTimePassword: values.oneTimePassword || generatedOneTimePassword
+      fullName: values.fullName,
+      email: values.email,
+      position: values.position,
+      roles: values.roles,
+      oneTimePassword: values.oneTimePassword || generatedOneTimePassword,
+      ...(values.companyId != null && values.companyId !== "" ? { companyId: Number(values.companyId) } : {})
     });
   };
 
@@ -357,6 +376,33 @@ export function AdminPanelPage() {
                         <Input placeholder="Финансист" />
                       </Form.Item>
                       <Form.Item
+                        label="Компания"
+                        name="companyId"
+                        tooltip="Обязательно, если выбрана роль «Администратор компании». Один администратор на компанию."
+                        style={{ minWidth: 300 }}
+                        dependencies={["roles"]}
+                        rules={[
+                          ({ getFieldValue }) => ({
+                            validator(_, value) {
+                              const roles = getFieldValue("roles") as string[] | undefined;
+                              if (roles?.includes("admin") && (value === undefined || value === null || value === "")) {
+                                return Promise.reject(new Error("Выберите компанию для администратора"));
+                              }
+                              return Promise.resolve();
+                            }
+                          })
+                        ]}
+                      >
+                        <Select
+                          allowClear
+                          placeholder="Платформа (без компании)"
+                          options={companies.map((c) => ({
+                            value: Number(c.key),
+                            label: `${c.companyName} (ИНН ${c.inn})`
+                          }))}
+                        />
+                      </Form.Item>
+                      <Form.Item
                         label="Роли"
                         name="roles"
                         rules={[{ required: true, message: "Выберите хотя бы одну роль" }]}
@@ -366,6 +412,7 @@ export function AdminPanelPage() {
                           mode="multiple"
                           placeholder="Выберите роли"
                           options={[
+                            { value: "admin", label: "Администратор компании (один на компанию)" },
                             { value: "lawyer", label: "Юрист" },
                             { value: "financier", label: "Финансист" },
                             { value: "accountant", label: "Бухгалтер" }

@@ -13,6 +13,7 @@ type EmployeeAccountRow = {
   password_value: string;
   is_temporary_password: 0 | 1;
   status: "Активен" | "Неактивен";
+  company_id: number | null;
 };
 
 function getBearerToken(req: Request) {
@@ -24,7 +25,7 @@ function getBearerToken(req: Request) {
 async function getEmployeeByToken(token: string): Promise<EmployeeAccountRow | null> {
   const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
     `
-      SELECT e.id, e.full_name, e.email, e.position, e.roles_json, e.password_value, e.is_temporary_password, e.status
+      SELECT e.id, e.full_name, e.email, e.position, e.roles_json, e.password_value, e.is_temporary_password, e.status, e.company_id
       FROM auth_sessions s
       JOIN employees e ON e.id = s.employee_id
       WHERE s.token = ?
@@ -35,7 +36,8 @@ async function getEmployeeByToken(token: string): Promise<EmployeeAccountRow | n
   return rows[0] ?? null;
 }
 
-function mapEmployeeProfile(row: EmployeeAccountRow) {
+/** DTO пользователя для login / GET/PATCH /users/me */
+export function mapEmployeeProfile(row: EmployeeAccountRow) {
   let roles: string[] = [];
   try {
     roles = JSON.parse(row.roles_json ?? "[]");
@@ -43,12 +45,15 @@ function mapEmployeeProfile(row: EmployeeAccountRow) {
     roles = [];
   }
 
-  const roleLabel = roles.includes("admin") ? "Администратор" : "Сотрудник";
+  const isAdmin = roles.includes("admin");
+  const roleLabel = isAdmin ? "Администратор" : "Сотрудник";
   return {
     fullName: row.full_name,
     email: row.email,
     position: row.position,
-    roleLabel
+    roleLabel,
+    companyId: row.company_id,
+    role: isAdmin ? ("admin" as const) : ("employee" as const)
   };
 }
 
@@ -65,7 +70,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
       `
-        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status
+        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id
         FROM employees
         WHERE email = ?
         LIMIT 1
@@ -145,15 +150,20 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
 
     const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
       `
-        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status
+        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id
         FROM employees
         WHERE id = ?
         LIMIT 1
       `,
       currentEmployee.id
     );
+    const updated = rows[0];
+    if (!updated) {
+      res.status(500).json({ message: "Не удалось загрузить профиль после обновления" });
+      return;
+    }
 
-    res.json(mapEmployeeProfile(rows[0]));
+    res.json(mapEmployeeProfile(updated));
   } catch (error) {
     logger.error(`❌ Ошибка обновления профиля: ${error}`);
     res.status(500).json({ message: "Ошибка обновления профиля" });

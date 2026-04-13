@@ -45,3 +45,8 @@ export async function resolveEmployeeContextByToken(token: string): Promise<Empl
     role: roles.includes("admin") ? "admin" : "employee"
   };
 }
+
+/** Управление тенантами и глобальным списком сотрудников — только у учётки без `company_id`. */
+export function isPlatformAdministrator(ctx: EmployeeAuthContext): boolean {
+  return ctx.role === "admin" && ctx.companyId === null;
+}
