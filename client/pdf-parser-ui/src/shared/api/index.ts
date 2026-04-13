@@ -152,6 +152,14 @@ export type RouteRow = {
   steps: string;
 };
 
+/** Зарегистрированные компании (ответ GET /admin/companies). */
+export type RegisteredCompanyRow = {
+  key: string;
+  companyName: string;
+  inn: string;
+  adminFullName: string;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
 const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? "false") === "true";
 const USE_MOCK_ADMIN_API = (import.meta.env.VITE_USE_MOCK_ADMIN_API ?? "false") === "true";
@@ -160,6 +168,9 @@ const USE_MOCK_PROFILE_API = (import.meta.env.VITE_USE_MOCK_PROFILE_API ?? "fals
 export const AUTH_TOKEN_STORAGE_KEY = "docflow-auth-token";
 export const AUTH_USER_STORAGE_KEY = "docflow-auth-user";
 export const USER_ROLE_STORAGE_KEY = "docflow-user-role";
+
+/** Должен совпадать с `PLATFORM_DEMO_ADMIN_EMAIL` на сервере (`admin.controller.ts`). */
+export const PLATFORM_DEMO_ADMIN_EMAIL = "platform-admin@docflow.local";
 
 const httpClient = axios.create({
   baseURL: API_BASE_URL
@@ -341,6 +352,15 @@ const mockEmployees: EmployeeRow[] = [
     position: "Юрист",
     roles: ["lawyer"],
     status: "Активен"
+  }
+];
+
+const mockRegisteredCompanies: RegisteredCompanyRow[] = [
+  {
+    key: "mock-1",
+    companyName: "ООО Пример",
+    inn: "7700000000",
+    adminFullName: "Пётр Админов"
   }
 ];
 
@@ -633,5 +653,47 @@ export const adminApi = {
     if (USE_MOCK_API) return Promise.resolve({ id: "mock-new-route", ...payload });
     const response = await httpClient.post("/admin/routes", payload);
     return response.data;
+  },
+  async listCompanies(): Promise<RegisteredCompanyRow[]> {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve(mockRegisteredCompanies);
+    const response = await httpClient.get("/admin/companies");
+    return response.data?.items ?? [];
+  },
+  async createCompany(payload: {
+    companyName: string;
+    inn: string;
+    adminFullName: string;
+    email: string;
+    password: string;
+  }) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Компания зарегистрирована (mock)" });
+    }
+    const response = await httpClient.post("/admin/companies", payload);
+    return response.data as { message?: string };
+  },
+  async updateCompany(
+    id: string,
+    payload: { companyName: string; inn: string; adminFullName: string }
+  ) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Обновлено (mock)" });
+    }
+    const response = await httpClient.patch(`/admin/companies/${id}`, payload);
+    return response.data as { message?: string };
+  },
+  async deleteCompany(id: string) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Удалено (mock)" });
+    }
+    const response = await httpClient.delete(`/admin/companies/${id}`);
+    return response.data as { message?: string };
+  },
+  async resetCompanyAdmin(id: string) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Сброс (mock)", oneTimePassword: "MOCKPASS12" });
+    }
+    const response = await httpClient.post(`/admin/companies/${id}/reset-admin`);
+    return response.data as { message?: string; oneTimePassword?: string };
   }
 };

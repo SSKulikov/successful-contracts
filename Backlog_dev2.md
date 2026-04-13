@@ -62,10 +62,10 @@
 
 ### День 1 (Пн)
 
-- [ ] Завершить/уточнить **`DEPLOY.md`** (если Day 0 был черновик): артефакты фронта/бэка, staging URL, все критичные env. *(Compose и Dockerfile уже добавлены.)*
+- [x] Завершить/уточнить **`DEPLOY.md`** (если Day 0 был черновик): артефакты фронта/бэка, staging URL, все критичные env. *(Compose и Dockerfile уже добавлены.)*
 - [x] **Репозиторий под docker-compose**: `mysql`, `redis`, `api` (`server/pdf-parser/Dockerfile`).
-- [ ] **Единый способ миграций на deploy**: runbook в `DEPLOY.md` или скрипт (`prisma migrate deploy` + путь к `schema.prisma`). *(Prisma-миграции для `contract` уже есть; документы согласования создаются через raw SQL в `ApprovalDomainService`.)*
-- [ ] Таблица **`companies`** и явная связь **`employees.company_id`** (сейчас колонка **опциональна**: `auth-context` проверяет наличие через `information_schema`; без миграции `company_id` везде `NULL`).
+- [x] **Единый способ миграций на deploy**: runbook в `DEPLOY.md` или скрипт (`prisma migrate deploy` + путь к `schema.prisma`). *(Prisma-миграции для `contract` уже есть; документы согласования создаются через raw SQL в `ApprovalDomainService`.)*
+- [x] Таблица **`companies`** и явная связь **`employees.company_id`** (сейчас колонка **опциональна**: `auth-context` проверяет наличие через `information_schema`; без миграции `company_id` везде `NULL`).
 
 **DoD:** compose поднимается локально; в PR — описание миграций; пересечение с Dev1 по контракту `company_id` задокументировано.
 

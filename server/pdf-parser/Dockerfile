@@ -20,5 +20,5 @@ RUN npx prisma generate --schema=src/prisma/schema.prisma \
 ENV NODE_ENV=production
 EXPOSE 3003
 
-# При старте применяем миграции Prisma, затем поднимаем HTTP-сервер
-CMD ["sh", "-c", "npx prisma migrate deploy --schema=src/prisma/schema.prisma && node dist/index.js"]
+# При старте применяем миграции Prisma (см. docs/DEPLOY.md — migrate:deploy), затем поднимаем HTTP-сервер
+CMD ["sh", "-c", "npm run migrate:deploy && node dist/index.js"]

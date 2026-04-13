@@ -21,7 +21,7 @@ export function LandingPage() {
             type="primary"
             size="large"
             className="landing-btn-primary"
-            onClick={() => navigate("/auth?tab=register")}
+            onClick={() => navigate("/auth")}
           >
             Начать работу
           </Button>

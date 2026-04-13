@@ -1,83 +1,72 @@
 # Деплой (staging и production)
 
-Документ описывает **куда кладутся артефакты** фронтенда и бэкенда, **какой URL считать staging** и какие **переменные окружения** нужны. Структура соответствует модулям `server/pdf-parser` и `client/pdf-parser-ui` в этом репозитории.
+Этот документ — **опорная спецификация выкладки**: артефакты сборки фронта и бэка, согласование URL (в т.ч. staging), критичные переменные окружения и миграции БД. Инфраструктура **Docker Compose** и **Dockerfile** API уже лежат в репозитории; ниже указано, как они стыкуются с ручным деплоем и с облаком.
+
+**Шаблоны env в репозитории (не коммитить секреты вместо них):**
+
+| Файл | Назначение |
+|------|------------|
+| `docker.env.example` | Скопировать в `.env` в **корне репозитория** рядом с `docker-compose.yml` для локального стека MySQL + Redis + API |
+| `server/pdf-parser/.env.example` | Подсказка по `DATABASE_URL` и legacy-парсеру для **локального** запуска API вне Docker |
 
 ---
 
-## Зачем нужен DEPLOY.md на раннем этапе
+## Краткая сводка
 
-На старте у команды часто нет ни выделенного сервера, ни финального домена. Документ всё равно полезен:
+| Компонент | Каталог | Сборка | Артефакт выкладки |
+|-----------|---------|--------|-------------------|
+| **API (Node)** | `server/pdf-parser` | `npm ci` → `npm run build` | Каталог **`dist/`** (скомпилированный TS → JS). Запуск: `node dist/index.js`. Порт по умолчанию **3003** (`src/index.ts`). Перед первым запуском на чистой БД: **`npm run migrate:deploy`** (см. раздел «Миграции»). |
+| **SPA (Vite)** | `client/pdf-parser-ui` | `npm ci` → `npm run build` | Каталог **`dist/`** (статика: `index.html`, `assets/*`). Отдаётся nginx/Caddy/S3/любым static host; **не** содержит секретов — URL API зашивается **на этапе сборки** через `VITE_*`. |
 
-1. **Один источник правды** — список переменных (`DATABASE_URL`, `REDIS_URL`, и т.д.), чтобы Dev1 и Dev2 не расходились в `.env` и не ломали интеграцию «фронт → API».
-2. **Согласование контракта** — фронт ходит на бэк по базовому URL (`VITE_API_URL`); бэк должен разрешать CORS для origin фронта (`CORS_ORIGIN`). Без явной фиксации легко получить «локально работает, на staging — 401/CORS».
-3. **Повторяемый деплой** — даже если первый выклад — ручной, описанные шаги и пути к билдам снижают bus factor и время онбординга.
-4. **Подготовка к продакшену** — `PUBLIC_APP_URL` для ссылок в Excel и писем задаётся заранее; позже смена домена сводится к обновлению env, а не к поиску хардкода.
-5. **Безопасность** — напоминание, что секреты только в env, не в репозитории (см. `.env.example` по мере наполнения).
-
-Итог: DEPLOY.md — не «инструкция только для девопса», а **минимальная спецификация окружения** для разработки и первого staging.
+**Критично для работы «фронт → API»:** во **frontend build** попадает `VITE_API_URL` (должен быть доступен с браузера пользователя). На **backend** в staging/prod задаются `DATABASE_URL`, при использовании кэша — `REDIS_URL`, для браузерных запросов к API — `CORS_ORIGIN` (совпадает с origin SPA).
 
 ---
 
-## Где лежит код и что собираем
+## URL и маршрутизация
 
-| Компонент | Каталог в репозитории | Сборка | Артефакт |
-|-----------|------------------------|--------|----------|
-| **Backend (API)** | `server/pdf-parser` | `npm install` → `npm run build` | `server/pdf-parser/dist/` |
-| **Frontend (SPA)** | `client/pdf-parser-ui` | `npm install` → `npm run build` | `client/pdf-parser-ui/dist/` |
+HTTP API монтируется под префиксом **`/api`** (см. `server/pdf-parser/src/index.ts`: `app.use("/api", fileRoutes)`). Health доступен и без префикса: `GET /health` и `GET /api/health`.
 
-Запуск API локально после сборки: `node ./dist/index.js` из каталога `server/pdf-parser` (порт по умолчанию **3003**, см. `src/index.ts`).
+| Сценарий | Фронт (куда заходит пользователь) | Значение `VITE_API_URL` (в билде фронта) |
+|----------|-----------------------------------|------------------------------------------|
+| Локально, API на 3003 | `http://localhost:5173` (Vite dev) | `http://localhost:3003/api` |
+| Локально, API из Docker (порт хоста 3004) | `http://localhost:5173` | `http://localhost:3004/api` |
+| Staging / production (один домен, reverse proxy) | `https://staging-app.example.com` | `https://staging-app.example.com/api` |
+| Staging / production (API на отдельном поддомене) | `https://staging-app.example.com` | `https://staging-api.example.com/api` |
 
-Статику фронта после сборки отдаёт **nginx**, **Caddy**, **S3+CloudFront** или другой хостинг статики; API — отдельный процесс (Node) или тот же reverse proxy с проксированием `/api` на бэкенд.
-
----
-
-## Staging: домены и URL (шаблон)
-
-Подставьте реальные значения для своей инфраструктуры:
-
-| Назначение | Пример URL (заменить на ваши) |
-|------------|-------------------------------|
-| Фронт (SPA) | `https://staging-app.example.com` |
-| API (если отдельный хост) | `https://staging-api.example.com` или тот же хост, префикс `/api` |
-
-Фронтенд обращается к API по базовому URL с суффиксом `/api` (см. `VITE_API_URL` ниже). На staging **в билде фронта** должно быть задано, например:
-
-`VITE_API_URL=https://staging-api.example.com/api`
-
-или при общем домене с reverse proxy:
-
-`VITE_API_URL=https://staging-app.example.com/api`
+Подставьте свои домены; для SPA **всегда** указывайте базовый URL **вместе с суффиксом `/api`**, если бэкенд отдаёт маршруты именно так (как в этом проекте).
 
 ---
 
 ## Переменные окружения
 
-### Backend (`server/pdf-parser`)
+Секреты и URL staging храните в **секретах CI**, **переменных платформы** (K8s, ECS) или в `.env` на сервере **вне git**.
 
-Задаются в окружении процесса Node (файл `.env` в корне `server/pdf-parser` для локальной разработки — не коммитить секреты).
+### Backend — процесс Node (`server/pdf-parser`)
+
+Загружаются из окружения процесса; локально удобен файл **`.env`** в `server/pdf-parser` (см. **`server/pdf-parser/.env.example`**).
 
 | Переменная | Обязательность | Назначение |
 |------------|----------------|------------|
-| `DATABASE_URL` | **Да** | Подключение Prisma/MySQL, например `mysql://USER:PASSWORD@HOST:3306/DB_NAME` |
-| `REDIS_URL` | Рекомендуется для кэша документов | URL Redis, например `redis://localhost:6379` или `rediss://...` для TLS. Если не задан — кэш отключается, запросы идут в БД |
-| `JWT_SECRET` | На будущее / опционально | Секрет для подписи JWT, **если** перейдёте с текущих сессионных токенов в `auth_sessions` на JWT. Сейчас в коде может не использоваться — оставьте в env для единообразия и будущих доработок |
-| `PUBLIC_APP_URL` | Для ссылок в Excel и писем | Публичный базовый URL **веб-приложения** без завершающего слэша, например `https://staging-app.example.com`. Используется при формировании ссылок вида «открыть документ» в экспорте |
-| `CORS_ORIGIN` | Рекомендуется на staging/prod | Origin фронтенда для заголовка `Access-Control-Allow-Origin`, например `https://staging-app.example.com`. Должен совпадать с тем, с какого URL пользователь открывает SPA (схема + хост + порт при необходимости) |
+| `DATABASE_URL` | **Да** | Строка Prisma/MySQL, например `mysql://USER:PASSWORD@HOST:3306/DB_NAME` |
+| `REDIS_URL` | Рекомендуется | Кэш документов (`redis://...` / `rediss://...`). Без неё — деградация на прямые запросы в БД |
+| `CORS_ORIGIN` | Рекомендуется на staging/prod | Origin фронта для `Access-Control-Allow-Origin` (можно несколько через **запятую**). Если **не задан** — разрешены запросы с любого origin (удобно для локальной разработки) |
+| `PUBLIC_APP_URL` | Рекомендуется | Публичный базовый URL веб-приложения **без** завершающего `/`; ссылки в экспорте Excel и т.п. |
+| `JWT_SECRET` | Опционально | Заготовка под JWT; текущая авторизация — сессии в `auth_sessions` |
 
-Дополнительно могут использоваться переменные из `server/pdf-parser/.env.example` (legacy-сервисы парсинга и т.д.) — см. комментарии в файле.
+Дополнительно в **`server/pdf-parser/.env.example`**: `OAUTH_TOKEN`, `GIGA_CHAT_ACCESS_KEY` и др. — **legacy / парсер**, смотрите комментарии в файле.
 
-### Frontend (`client/pdf-parser-ui`)
+### Frontend — только на этапе сборки (`client/pdf-parser-ui`)
 
-Задаются **на этапе сборки** (Vite), префикс `VITE_`:
+Переменные с префиксом **`VITE_`** встраиваются в бандл; отдельного `.env` в репозитории для фронта нет — задайте их в CI или в командной строке перед `npm run build`.
 
 | Переменная | Назначение |
 |------------|------------|
-| `VITE_API_URL` | Базовый URL API, по умолчанию в коде `http://localhost:3003/api`. На staging: полный URL до префикса `/api`, например `https://staging-app.example.com/api` |
-| `VITE_USE_MOCK_API` | `false` на реальном API |
-| `VITE_USE_MOCK_ADMIN_API` | `false`, когда админские эндпоинты готовы |
-| `VITE_USE_MOCK_PROFILE_API` | `false`, когда профиль идёт в API |
+| `VITE_API_URL` | Базовый URL API **с** суффиксом `/api`, например `https://staging-app.example.com/api` |
+| `VITE_USE_MOCK_API` | На реальном API: **`false`** |
+| `VITE_USE_MOCK_ADMIN_API` | Когда админка ходит в бэкенд: **`false`** |
+| `VITE_USE_MOCK_PROFILE_API` | Когда профиль из API: **`false`** |
 
-Пример команды сборки фронта для staging:
+Пример сборки фронта для staging:
 
 ```bash
 cd client/pdf-parser-ui
@@ -88,11 +77,31 @@ VITE_USE_MOCK_PROFILE_API=false \
 npm run build
 ```
 
+Артефакт: **`client/pdf-parser-ui/dist/`** — целиком выкладывается на хостинг статики.
+
+### Docker Compose — переменные для `docker compose` (корень репозитория)
+
+Копирование: **`cp docker.env.example .env`**. Подставляются в `docker-compose.yml` при `docker compose up`.
+
+| Переменная | Назначение |
+|------------|------------|
+| `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE` | Учётные данные MySQL в контейнере |
+| `MYSQL_PORT` | Порт MySQL на **хосте** (по умолчанию 3307, чтобы не конфликтовать с локальным :3306) |
+| `REDIS_PORT` | Порт Redis на хосте |
+| `API_PORT` | Порт API на **хосте** (внутри контейнера API слушает 3003; с хоста часто **3004**) |
+| `PUBLIC_APP_URL`, `CORS_ORIGIN` | Проброс в контейнер `api` (ссылки и CORS; для dev часто `http://localhost:5173`) |
+| `JWT_SECRET` | Заготовка под подписи |
+| `ADMINER_PORT` | Порт Adminer при профиле `tools` |
+
+Строка **`DATABASE_URL`** для сервиса `api` в compose задаётся **в `docker-compose.yml`** (подключение к `mysql`), а не в `docker.env.example` — при переносе в облако задайте аналогичный `DATABASE_URL` на процесс Node.
+
 ---
 
 ## Docker Compose: API + MySQL + Redis
 
-В корне репозитория лежит `docker-compose.yml`: поднимает **бэкенд** (`server/pdf-parser`, образ собирается из `Dockerfile`) и инфраструктуру **MySQL** и **Redis**. Фронт (`client/pdf-parser-ui`) в compose **не включён** — его удобно гонять локально (`npm run dev`, порт **5173**). Если API из Docker с пробросом **3004** на хост: `VITE_API_URL=http://localhost:3004/api`; если бэкенд локально на **3003**: `http://localhost:3003/api`.
+В корне репозитория лежит **`docker-compose.yml`**: поднимает **бэкенд** (образ из **`server/pdf-parser/Dockerfile`**) и сервисы **MySQL** и **Redis**. Сборка API в образе: `npm ci`, `prisma generate`, `npm run build`; при старте контейнера: **`npm run migrate:deploy`** затем **`node dist/index.js`** (порт процесса внутри контейнера **3003**, на хост мапится через **`API_PORT`**, по умолчанию **3004**).
+
+Фронт (`client/pdf-parser-ui`) в compose **не включён** — его удобно собирать отдельно и отдавать статикой или гонять **`npm run dev`** (порт **5173**). Если API из Docker с пробросом **3004** на хост: `VITE_API_URL=http://localhost:3004/api`; если бэкенд локально на **3003**: `http://localhost:3003/api`.
 
 ```bash
 cp docker.env.example .env   # по желанию поправьте пароли и порты
@@ -156,12 +165,34 @@ docker compose up -d --build
 
 | Сервис | Образ / сборка | Зачем нужен |
 |--------|------------------|-------------|
-| **mysql** | `mysql:8.0` | Хранилище Prisma и raw SQL (`employees`, `auth_sessions`, документы согласования и т.д.). Без него API не сможет сохранять данные. Том `mysql_data` сохраняет данные между перезапусками. |
+| **mysql** | `mysql:8.0` | Хранилище Prisma (в т.ч. `contract`, `companies`, `employees`, `auth_sessions` после `migrate:deploy`) и raw SQL домена согласований. Без него API не сможет сохранять данные. Том `mysql_data` сохраняет данные между перезапусками. |
 | **redis** | `redis:7-alpine` | Кэш чтения документов и инвалидация (`REDIS_URL`). При отсутствии Redis приложение деградирует к БД, но в compose кэш включён для проверки сценариев как на staging. Том `redis_data` — опциональная персистентность AOF. |
-| **api** | `build: ./server/pdf-parser` | HTTP API (Express). При старте выполняет `prisma migrate deploy`, затем `node dist/index.js`. В образе установлены **GraphicsMagick / Ghostscript** для зависимостей парсинга PDF (pdf2pic и др.). |
+| **api** | `build: ./server/pdf-parser` | HTTP API (Express). При старте контейнера выполняется **`npm run migrate:deploy`** (эквивалент `prisma migrate deploy` с `--schema=src/prisma/schema.prisma`), затем `node dist/index.js`. В образе установлены **GraphicsMagick / Ghostscript** для зависимостей парсинга PDF (pdf2pic и др.). |
 | **adminer** (профиль `tools`) | `adminer:4` | Только для разработки: просмотр таблиц без CLI. В продакшене обычно не поднимают. |
 
-Подробные переменные см. в `docker.env.example` и в таблице выше (раздел «Переменные окружения»). Бэкенд читает **`CORS_ORIGIN`** в `utils/cors-config.ts`: если задан — разрешены только перечисленные origin (несколько через запятую); если **не** задан — допускаются запросы с любого origin (удобно для локальной разработки без `.env`).
+Подробности по переменным для compose — в разделе **«Docker Compose — переменные»** и в файле **`docker.env.example`**. Бэкенд читает **`CORS_ORIGIN`** в `server/pdf-parser/src/utils/cors-config.ts`: если задан — разрешены только перечисленные origin (несколько через запятую); если **не** задан — допускаются запросы с любого origin (удобно для локальной разработки без `.env`).
+
+### Статика фронта и reverse proxy (staging / production)
+
+Каталог **`client/pdf-parser-ui/dist/`** выкладывается как корень сайта (SPA). Запросы к API должны попадать на тот же хост с префиксом **`/api`** (как в `VITE_API_URL`), либо на отдельный поддомен — тогда в билде фронта указывают полный URL API. Пример для **nginx** (один домен, фронт + прокси API на тот же бэкенд):
+
+```nginx
+# Упрощённый пример: статика SPA + проксирование /api на Node
+location / {
+  root /var/www/app/dist;
+  try_files $uri $uri/ /index.html;
+}
+location /api/ {
+  proxy_pass http://127.0.0.1:3003/api/;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Порт бэкенда и пути подстроьте под ваш процесс (systemd, Docker, K8s).
 
 ---
 
@@ -185,26 +216,89 @@ curl -sS http://localhost:3003/api/health
 
 ---
 
-## Миграции базы данных (Prisma)
+## Миграции базы данных (единый runbook на deploy)
 
-Схема: `server/pdf-parser/src/prisma/schema.prisma`.
+### Что считается «официальным» способом
 
-Деплой миграций (после выкладки кода):
+Один и тот же шаг для **staging / production / ручного деплоя** и для **Docker** (см. `CMD` в `server/pdf-parser/Dockerfile`):
+
+1. Рабочий каталог: **`server/pdf-parser`**.
+2. Установлена переменная **`DATABASE_URL`** (тот же MySQL, куда подключается API).
+3. Выполняется **применение Prisma-миграций** к этой БД.
+
+**Рекомендуемая команда (npm-скрипт в репозитории):**
+
+```bash
+cd server/pdf-parser
+npm ci   # или npm install — на CI обычно npm ci
+npm run migrate:deploy
+```
+
+**Эквивалент напрямую через Prisma CLI** (тот же эффект; путь к схеме обязателен, т.к. `schema.prisma` лежит не в корне пакета):
 
 ```bash
 cd server/pdf-parser
 npx prisma migrate deploy --schema=src/prisma/schema.prisma
 ```
 
-Часть таблиц (например, документы согласования) может создаваться через raw SQL при старте приложения — уточняйте у команды актуальный список.
+Алиас в `package.json`: `prisma-migrate-deploy` дублирует `migrate:deploy`.
+
+Перед деплоем при необходимости сгенерируйте клиент (обычно уже в шаге сборки образа/CI):
+
+```bash
+npx prisma generate --schema=src/prisma/schema.prisma
+```
+
+### Что покрывают Prisma-миграции
+
+- В **`src/prisma/schema.prisma`** описаны модели **`contract`**, **`Company`**, **`Employee`**, **`AuthSession`**; история SQL — в **`src/prisma/migrations/`**.
+- Миграция **`20260413120000_add_companies_employees_auth_sessions`** создаёт (идемпотентно, с учётом старых БД) таблицы **`companies`**, **`employees`** (включая опциональный **`company_id`** и FK на `companies`), **`auth_sessions`** (FK на `employees`). Колонка **`employees.company_id`** может быть `NULL` (платформенный админ, legacy).
+- `prisma migrate deploy` применяет эти SQL-файлы и ведёт учёт в **`_prisma_migrations`**.
+
+### Что по-прежнему создаётся raw SQL при работе API (не Prisma)
+
+| Область | Где в коде | Пример таблиц |
+|---------|------------|----------------|
+| Согласование документов | `server/pdf-parser/src/services/ApprovalDomainService/` | `approval_documents`, `approval_tasks`, … |
+
+После `migrate:deploy` приложение при первом входе/вызове админки может **добавить только данные** (например, учётную платформенного демо-админа в `employees`), без DDL таблиц `employees` / `companies` / `auth_sessions` — схема должна уже существовать за счёт миграций выше.
+
+Итог на deploy:
+
+- **Обязательно:** `npm run migrate:deploy` — схема **`contract`**, **`companies`**, **`employees`**, **`auth_sessions`** и связи между ними.
+- Документы согласования и связанные таблицы — по-прежнему через **`ApprovalDomainService`** при первом обращении к домену согласований.
+
+### Docker
+
+В `server/pdf-parser/Dockerfile` точка входа уже содержит:
+
+`npm run migrate:deploy && node dist/index.js`
+
+(это тот же `prisma migrate deploy` с `--schema=src/prisma/schema.prisma`, см. `package.json`.)
+
+При поднятии стека через `docker compose` миграции Prisma выполняются **при каждом старте контейнера `api`** (после готовности MySQL за счёт `depends_on` + healthcheck). Ручной `migrate:deploy` на хосте нужен, если API деплоится **без** этого Dockerfile.
+
+### CI/CD (шаблон шага)
+
+Условно:
+
+```yaml
+# пример: job перед выкладкой артефакта или перед restart сервиса
+- run: cd server/pdf-parser && npm ci && npm run migrate:deploy
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+```
+
+`DATABASE_URL` должен указывать на целевую БД с правами на DDL (CREATE/ALTER) или хотя бы на применение уже существующих миграций.
 
 ---
 
 ## Чеклист перед первым выкладом на staging
 
-- [ ] В `.env` / секретах сервера заданы `DATABASE_URL`, при необходимости `REDIS_URL`, `PUBLIC_APP_URL`, `CORS_ORIGIN`
-- [ ] Фронт собран с `VITE_API_URL`, указывающим на доступный с браузера URL API
-- [ ] Выполнены миграции Prisma
+- [ ] Для **Docker Compose**: скопирован `docker.env.example` → `.env` в корне репозитория, при необходимости поправлены порты и пароли
+- [ ] Для **API без Docker**: в окружении процесса заданы **`DATABASE_URL`**, при необходимости **`REDIS_URL`**, **`PUBLIC_APP_URL`**, **`CORS_ORIGIN`** (см. `server/pdf-parser/.env.example`)
+- [ ] Фронт собран с **`VITE_API_URL`**, указывающим на URL API **доступный из браузера пользователя** (часто тот же хост, что и SPA, путь `/api`)
+- [ ] К целевой БД применены миграции: **`npm run migrate:deploy`** в `server/pdf-parser` (или тот же шаг в Docker CMD / CI)
 - [ ] `GET /health` или `GET /api/health` возвращает `200` и JSON со `status: "ok"`
 - [ ] Smoke: открытие SPA, логин, один запрос к защищённому API
 
@@ -212,5 +306,7 @@ npx prisma migrate deploy --schema=src/prisma/schema.prisma
 
 ## Связанные документы
 
+- `docker-compose.yml`, `docker.env.example` — локальный стек MySQL + Redis + API
+- `server/pdf-parser/Dockerfile` — образ API для compose и для облачного деплоя контейнером
 - `ROADMAP-DELTA.md` — §6 переменные окружения (дополнение к существующему `.env`)
 - `server/pdf-parser/README.md` — детали бэкенда и локального запуска

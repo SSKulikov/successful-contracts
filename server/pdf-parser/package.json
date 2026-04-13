@@ -9,6 +9,7 @@
     "build": "tsc",
     "format": "prettier --config .prettierrc --write \"src/**/*.{js,ts}\"",
     "prisma-migrate": "prisma migrate dev --name название_миграции --schema=src/prisma/schema.prisma",
+    "migrate:deploy": "prisma migrate deploy --schema=src/prisma/schema.prisma",
     "prisma-migrate-deploy": "prisma migrate deploy --schema=src/prisma/schema.prisma",
     "prisma-generate": "prisma generate --schema=src/prisma/schema.prisma",
     "prisma-studio": "prisma studio --schema=src/prisma/schema.prisma"

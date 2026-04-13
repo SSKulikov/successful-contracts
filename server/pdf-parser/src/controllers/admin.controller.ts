@@ -8,6 +8,7 @@ type CreateEmployeeBody = {
   position?: string;
   roles?: string[];
   oneTimePassword?: string;
+  companyId?: number;
 };
 
 type EmployeeRow = {
@@ -20,67 +21,47 @@ type EmployeeRow = {
   created_at: Date;
 };
 
-function generateOneTimePassword() {
+export function generateOneTimePassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
   return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
 }
 
-async function ensureEmployeesTable() {
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS employees (
-      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-      full_name VARCHAR(255) NOT NULL,
-      email VARCHAR(255) NOT NULL UNIQUE,
-      position VARCHAR(255) NOT NULL,
-      roles_json TEXT NOT NULL,
-      password_value VARCHAR(255) NOT NULL,
-      is_temporary_password TINYINT(1) NOT NULL DEFAULT 1,
-      status VARCHAR(32) NOT NULL DEFAULT 'Активен',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+/**
+ * Гарантирует наличие демо-записей в `employees` (схема таблиц — через Prisma migrate).
+ * Вызывать после `prisma migrate deploy` на деплое.
+ */
+export async function ensureEmployeesTable() {
+  await ensurePlatformDemoAdmin();
+}
 
-  const passwordColumn = await prisma.$queryRawUnsafe<Array<{ cnt: number }>>(
-    `
-      SELECT COUNT(*) AS cnt
-      FROM information_schema.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = 'employees'
-        AND COLUMN_NAME = 'password_value'
-    `
+/** Email учётной «платформенного» демо-админа (совпадает с вводом на клиенте при логине admin/111). */
+export const PLATFORM_DEMO_ADMIN_EMAIL = "platform-admin@docflow.local";
+
+async function ensurePlatformDemoAdmin() {
+  const existing = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+    `SELECT id FROM employees WHERE email = ? LIMIT 1`,
+    PLATFORM_DEMO_ADMIN_EMAIL
   );
-  if (Number(passwordColumn[0]?.cnt ?? 0) === 0) {
-    await prisma.$executeRawUnsafe(
-      "ALTER TABLE employees ADD COLUMN password_value VARCHAR(255) NOT NULL DEFAULT ''"
-    );
+  if (existing[0]) {
+    return;
   }
 
-  const temporaryColumn = await prisma.$queryRawUnsafe<Array<{ cnt: number }>>(
-    `
-      SELECT COUNT(*) AS cnt
-      FROM information_schema.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE()
-        AND TABLE_NAME = 'employees'
-        AND COLUMN_NAME = 'is_temporary_password'
-    `
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    "Администратор платформы",
+    PLATFORM_DEMO_ADMIN_EMAIL,
+    "Администратор",
+    JSON.stringify(["admin"]),
+    "111",
+    0,
+    "Активен",
+    null
   );
-  if (Number(temporaryColumn[0]?.cnt ?? 0) === 0) {
-    await prisma.$executeRawUnsafe(
-      "ALTER TABLE employees ADD COLUMN is_temporary_password TINYINT(1) NOT NULL DEFAULT 1"
-    );
-  }
+  logger.info(`✅ Создана учётная запись платформенного админа: ${PLATFORM_DEMO_ADMIN_EMAIL}`);
 }
 
 export async function ensureAuthSessionsTable() {
   await ensureEmployeesTable();
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      token VARCHAR(255) NOT NULL PRIMARY KEY,
-      employee_id INT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT fk_auth_sessions_employee FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
-    )
-  `);
 }
 
 export async function listEmployees(req: Request, res: Response): Promise<void> {
@@ -129,6 +110,12 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
     const position = (body.position ?? "").trim();
     const roles = Array.isArray(body.roles) ? body.roles.filter((role) => typeof role === "string" && role.trim()) : [];
 
+    let companyId: number | null = null;
+    if (body.companyId != null) {
+      const n = Number(body.companyId);
+      if (!Number.isNaN(n) && n > 0) companyId = n;
+    }
+
     if (!fullName || !email || !position || roles.length === 0) {
       res.status(400).json({
         message: "Поля fullName, email, position и roles обязательны"
@@ -142,14 +129,15 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
         : generateOneTimePassword();
 
     await prisma.$executeRawUnsafe(
-      "INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       fullName,
       email,
       position,
       JSON.stringify(roles),
       oneTimePassword,
       1,
-      "Активен"
+      "Активен",
+      companyId
     );
 
     logger.info(`✅ Создан сотрудник: ${email}`);
