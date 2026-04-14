@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import { logger } from "../utils/logger";
-import { getBearerToken, resolveEmployeeContextByToken } from "../utils/auth-context";
 import { addApprovalDocumentEvent, ensureApprovalDomainTables } from "../services/ApprovalDomainService";
 import { del, invalidateMyDocumentsListCaches } from "../cache/redis";
 
@@ -27,17 +26,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const search = normalizeOptionalQueryString(req.query.q);
     const typeFilter = normalizeOptionalQueryString(req.query.type);
@@ -145,17 +134,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
 async function completeTaskDecision(req: Request, res: Response, action: DecisionAction): Promise<void> {
   await ensureApprovalDomainTables();
 
-  const token = getBearerToken(req);
-  if (!token) {
-    res.status(401).json({ message: "Отсутствует токен авторизации" });
-    return;
-  }
-
-  const employee = await resolveEmployeeContextByToken(token);
-  if (!employee) {
-    res.status(401).json({ message: "Сессия не найдена" });
-    return;
-  }
+  const employee = req.authContext!;
 
   const taskId = Number(req.params.taskId);
   if (!Number.isInteger(taskId) || taskId <= 0) {

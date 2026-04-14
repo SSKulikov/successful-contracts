@@ -3,7 +3,7 @@ import { Request, Response } from "express";
 import prisma from "../prisma";
 import { logger } from "../utils/logger";
 import * as XLSX from "xlsx";
-import { EmployeeAuthContext, getBearerToken, resolveEmployeeContextByToken } from "../utils/auth-context";
+import type { EmployeeAuthContext } from "../utils/auth-context";
 import { del, getJson, invalidateMyDocumentsListCaches, setJson } from "../cache/redis";
 import {
   addApprovalDocumentEvent,
@@ -242,17 +242,7 @@ export async function createDocument(req: Request, res: Response): Promise<void>
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const body: CreateDocumentBody = req.body ?? {};
     const type = normalizeString(body.type);
@@ -328,17 +318,7 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const filters = parseDocumentListFilters(req.query);
     if ((filters.dateFromRaw && !filters.dateFrom) || (filters.dateToRaw && !filters.dateTo)) {
@@ -400,17 +380,7 @@ export async function getMyDocumentsStatusStats(req: Request, res: Response): Pr
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const { whereClause, values } = buildDocumentListWhere(employee, EMPTY_MY_DOCUMENT_LIST_FILTERS);
 
@@ -450,17 +420,7 @@ export async function exportDocumentsXlsx(req: Request, res: Response): Promise<
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const filters = parseDocumentListFilters(req.query);
     if ((filters.dateFromRaw && !filters.dateFrom) || (filters.dateToRaw && !filters.dateTo)) {
@@ -528,17 +488,7 @@ export async function submitDocument(req: Request, res: Response): Promise<void>
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -609,17 +559,7 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -687,17 +627,7 @@ export async function withdrawDocument(req: Request, res: Response): Promise<voi
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -762,17 +692,7 @@ export async function deleteDocument(req: Request, res: Response): Promise<void>
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -827,17 +747,7 @@ export async function updateDocument(req: Request, res: Response): Promise<void>
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {
@@ -1053,17 +963,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
   try {
     await ensureApprovalDomainTables();
 
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await resolveEmployeeContextByToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authContext!;
 
     const documentId = Number(req.params.id);
     if (!Number.isInteger(documentId) || documentId <= 0) {

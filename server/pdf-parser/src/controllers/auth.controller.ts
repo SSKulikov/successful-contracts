@@ -2,8 +2,6 @@ import { Request, Response } from "express";
 import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
 import type { EmployeeAccountRow } from "../types/employee-account";
-import { getEmployeeByAuthToken } from "../utils/auth-token";
-import { getBearerToken } from "../utils/auth-context";
 import { signAccessToken } from "../utils/jwt";
 import { hashPassword, verifyPasswordOrMigrate } from "../utils/passwords";
 import { ensureAuthSessionsTable } from "./admin.controller";
@@ -107,18 +105,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
 export async function getMyProfile(req: Request, res: Response): Promise<void> {
   try {
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await getEmployeeByAuthToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
-
+    const employee = req.authEmployee!;
     res.json(mapEmployeeProfile(employee));
   } catch (error) {
     logger.error(`❌ Ошибка получения профиля: ${error}`);
@@ -128,17 +115,7 @@ export async function getMyProfile(req: Request, res: Response): Promise<void> {
 
 export async function updateMyProfile(req: Request, res: Response): Promise<void> {
   try {
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const currentEmployee = await getEmployeeByAuthToken(token);
-    if (!currentEmployee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const currentEmployee = req.authEmployee!;
 
     const fullName = String(req.body?.fullName ?? "").trim();
     const email = String(req.body?.email ?? "").trim().toLowerCase();
@@ -174,17 +151,7 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
 
 export async function changeMyPassword(req: Request, res: Response): Promise<void> {
   try {
-    const token = getBearerToken(req);
-    if (!token) {
-      res.status(401).json({ message: "Отсутствует токен авторизации" });
-      return;
-    }
-
-    const employee = await getEmployeeByAuthToken(token);
-    if (!employee) {
-      res.status(401).json({ message: "Сессия не найдена" });
-      return;
-    }
+    const employee = req.authEmployee!;
 
     const currentPassword = String(req.body?.currentPassword ?? "");
     const newPassword = String(req.body?.newPassword ?? "");

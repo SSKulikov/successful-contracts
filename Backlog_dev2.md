@@ -12,14 +12,18 @@
 
 | Область | Факт в репо |
 |---------|-------------|
-| **Auth** | `POST /api/auth/login`, `GET/PATCH /api/users/me`, `POST /api/users/me/change-password` в `auth.controller.ts`; сессия по **Bearer UUID** в `auth_sessions` (не JWT). |
-| **Контекст сотрудника** | `resolveEmployeeContextByToken` в `utils/auth-context.ts`: `companyId` (если есть колонка `employees.company_id`), `role` admin/employee. |
+| **Auth** | `POST /api/auth/login`, `GET/PATCH /api/users/me`, `POST /api/users/me/change-password` в `auth.controller.ts`; защищённые роуты через **`requireAuth`** (`req.authEmployee`, `req.authContext`). **Bearer:** основной токен — **JWT** (HS256, `utils/jwt.ts`): в payload — `companyId`, `role`, `sub` = id сотрудника; поддерживаются **legacy**-строки из таблицы **`auth_sessions`** (`utils/auth-token.ts`). Переменные **`JWT_SECRET`**, **`JWT_EXPIRES_IN`**. |
+| **Пароли** | **bcrypt** в `employees.password_value` (`utils/passwords.ts`); опционально дублирование хеша в **Redis** (`setPasswordHashRedis`). |
+| **Компании и регистрация** | Таблица **`companies`**, **`employees.company_id`**. Регистрация компании: **`POST /api/admin/companies`** (транзакция company + первый сотрудник-**admin**), только для **платформенного администратора** (`requireAuth` → **`requirePlatformAdmin`**). Публичного **`POST /api/auth/register-company`** нет — осознанно (B2B SaaS). |
+| **Инварианты** | Один администратор на компанию (`company-roles.ts`, проверки в `admin.controller` / `companies.controller`). |
+| **Контекст сотрудника** | `resolveEmployeeContextByToken` в `utils/auth-context.ts` через **`getEmployeeByAuthToken`**: `companyId`, `role` admin/employee (данные из БД после проверки токена). |
 | **Tenant** | В `documents.controller.ts` и `approvals.controller.ts` — фильтры и проверки `company_id` / `employee.companyId`. |
-| **Сотрудники (админ)** | `GET/POST /api/admin/employees` в `admin.controller.ts`; роли в `roles_json`; одноразовый пароль при создании. |
-| **Redis** | `src/cache/redis.ts`, использование в документах/согласованиях; при отсутствии `REDIS_URL` — отказ без падения процесса. |
-| **Временный пароль** | Колонка `is_temporary_password`; логин отдаёт `isTemporaryPassword`; фронт (`AuthPage`) предупреждает — **блокировки mutation на бэке под флаг пока нет**. |
+| **Сотрудники (платф. админ)** | `GET/POST /api/admin/employees` в `admin.controller.ts` (защита `requirePlatformAdmin`); роли в `roles_json`; bcrypt одноразового пароля при создании. |
+| **Redis** | `src/cache/redis.ts` — кэш документов/согласований, опционально хеши паролей; при отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
+| **Профиль / DTO** | `GET/PATCH /users/me` отдаёт **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position` (см. `mapEmployeeProfile`). |
+| **Временный пароль** | Колонка `is_temporary_password`; логин отдаёт `isTemporaryPassword`; фронт предупреждает — **серверной блокировки mutation до смены пароля пока нет**. |
 
-Ещё **нет** в репо (остаётся в беклоге): таблица **`companies`** и **`POST .../register-company`**, хэширование паролей, **`/api/admin/routes`** на сервере (вызов есть только во фронте `adminApi`), **уведомления**, **soft delete** сотрудников, **PATCH/reset-password** для employee, отдельный **`requireAdmin` middleware**, аватар, CI, rate limit / security headers. **`docs/DEPLOY.md`**, **`docker-compose.yml`**, **`Dockerfile`**, **`GET /health`**, **`GET /api/health`**, **CORS из `CORS_ORIGIN`** (`utils/cors-config.ts`) — есть.
+Ещё **нет** в репо (остаётся в беклоге): публичная саморегистрация компании (если понадобится), **`/api/admin/routes`** на сервере (вызов только во фронте `adminApi`), **уведомления**, **soft delete** сотрудников, **PATCH/reset-password** для employee, аватар, CI, rate limit / security headers. **`docs/DEPLOY.md`**, **`docker-compose.yml`**, **`Dockerfile`**, **`GET /health`**, **`GET /api/health`**, **CORS из `CORS_ORIGIN`** (`utils/cors-config.ts`) — есть.
 
 ---
 
@@ -29,7 +33,7 @@
 |----------|----------------|
 | **Общая дорожная карта** | Фундамент: деплой/staging, Docker, компания и auth, tenant (`companyId`), сотрудники, RBAC, маршруты согласования, профиль/аватар, уведомления, безопасность и прод в конце. |
 | **ROADMAP-DELTA** | Расширять существующий Express (`routes.ts`, контроллеры), Prisma или raw SQL в том же стиле что `employees`. Dev2: компания, админка/auth, уведомления, compose/CI/env. Стык: стабильные DTO `companyId`, ролей, маршрутов для Dev1. |
-| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш, контекст сотрудника и часть RBAC **уже в коде**. Для Dev2 по-прежнему критичны: **CORS из env**, **компания + регистрация**, усиление **профиля/DTO** (`companyId`, `mustChangePassword` в `GET /users/me`), **хэш паролей**, **маршруты согласования в API**, уведомления, инфраструктура прода. Деплой-док, compose и **health** — добавлены. |
+| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш, **компании + регистрация через платформенного админа**, **JWT + bcrypt**, **companyId/role в DTO**, контекст сотрудника и **`requirePlatformAdmin`** — **уже в коде**. Остаётся: **`mustChangePassword` в профиле** и серверная блокировка по временному паролю, **маршруты согласования в API**, уведомления, инфраструктура прода, CI. Деплой-док, compose и **health** — добавлены. |
 
 **Правила каждого дня**
 
@@ -50,7 +54,7 @@
 - [x] **`docker-compose`** (минимум): `api` + MySQL + Redis; опционально Adminer; описание аналога в облаке — в `docs/DEPLOY.md`. Файлы: `docker-compose.yml`, `server/pdf-parser/Dockerfile`, `docker.env.example`.
 - [x] **`GET /api/health`** и **`GET /health`** — liveness (`health.controller.ts`, без проверки БД/Redis).
 - [x] **CORS**: allowed origin из env (`CORS_ORIGIN`), несколько origin через запятую; без env — как раньше (любой origin). См. `utils/cors-config.ts`.
-- [x] **Модуль Redis** в приложении — есть (`src/cache/redis.ts`); дополнить **`.env.example`** строками `REDIS_URL`, `PUBLIC_APP_URL`, `CORS_ORIGIN`, `JWT_SECRET` (сейчас в примере только `DATABASE_URL` и устаревшие опции).
+- [x] **Модуль Redis** в приложении — есть (`src/cache/redis.ts`); **`.env.example`** дополнен (`JWT_SECRET`, `JWT_EXPIRES_IN`, комментарии к CORS и т.д. — см. актуальный файл).
 - [x] **Сборка** `server/pdf-parser`: при установленных зависимостях `npm run build` проходит (зависимости `ioredis`, `xlsx` в `package.json`).
 - [ ] **Синхронизация с Dev1**: кто создаёт первую компанию и как заполняется `company_id` до появления API регистрации (сиды / ручной SQL / временный скрипт). *(В коде уже читается `company_id` у сотрудника, если колонка добавлена в БД.)*
 
@@ -65,24 +69,25 @@
 - [x] Завершить/уточнить **`DEPLOY.md`** (если Day 0 был черновик): артефакты фронта/бэка, staging URL, все критичные env. *(Compose и Dockerfile уже добавлены.)*
 - [x] **Репозиторий под docker-compose**: `mysql`, `redis`, `api` (`server/pdf-parser/Dockerfile`).
 - [x] **Единый способ миграций на deploy**: runbook в `DEPLOY.md` или скрипт (`prisma migrate deploy` + путь к `schema.prisma`). *(Prisma-миграции для `contract` уже есть; документы согласования создаются через raw SQL в `ApprovalDomainService`.)*
-- [x] Таблица **`companies`** и явная связь **`employees.company_id`** (сейчас колонка **опциональна**: `auth-context` проверяет наличие через `information_schema`; без миграции `company_id` везде `NULL`).
+- [x] Таблица **`companies`** и связь **`employees.company_id`** (миграция Prisma; `company_id` может быть `NULL` у платформенного админа).
 
 **DoD:** compose поднимается локально; в PR — описание миграций; пересечение с Dev1 по контракту `company_id` задокументировано.
 
 ### День 2 (Вт)
 
-- [ ] **Модель Company + User/Admin**: первый пользователь при регистрации компании — админ (как в дорожной карте).
-- [ ] **`POST /api/auth/register-company`**: валидация, хэш пароля, транзакция company + user/employee.
-- [x] **`POST /api/auth/login`** и сессии **`auth_sessions`** — уже есть; токен — **UUID**, не JWT. Доработки: **хэш пароля** (сейчас сравнение plain text), при необходимости заголовок `Authorization` как сейчас.
-- [ ] Общий **`requireAuth`** / `requireBearer` middleware вместо разрозненных проверок в контроллерах — по желанию рефакторинг; функционально Bearer уже используется.
-- [x] **Tenant в контексте**: `companyId` и `role` в **`resolveEmployeeContextByToken`** — готово; убедиться, что **фронт и `GET /users/me`** отдают те же поля явно (см. день 3).
+- [x] **Модель Company + User/Admin**: при создании компании первый пользователь — **админ компании** (`roles_json` содержит `admin`), транзакция в **`createCompany`** (`companies.controller.ts`).
+- [x] **Регистрация компании в API**: реализовано как **`POST /api/admin/companies`** (не `/api/auth/register-company`): валидация, **bcrypt** пароля админа, транзакция company + employee, дублирование хеша в Redis при наличии. Доступ только с **`requirePlatformAdmin`** (B2B SaaS). Публичная саморегистрация — отдельное решение продукта, в беклоге не закрыта.
+- [x] **`POST /api/auth/login`**: **JWT** access-токен + **legacy**-сессии `auth_sessions` для старых клиентов; **хэш паролей bcrypt**; `Authorization: Bearer` без изменений.
+- [x] Общий **`requireAuth`** (`middleware/requireAuth.ts`): Bearer → `req.authEmployee` + `req.authContext`; контроллеры документов, согласований и профиля без дублирования проверок. **`/api/admin/*`**: цепочка **`requireAuth` → `requirePlatformAdmin`** (без второго запроса к БД при валидном токене).
+- [x] **Tenant в контексте**: `companyId` и `role` в **`resolveEmployeeContextByToken`**; **`GET /users/me`** отдаёт **`companyId`** и **`role`** в DTO (`mapEmployeeProfile`). Расширение **`mustChangePassword`** — см. день 3.
 
-**DoD:** регистрация компании и усиленный логин проходят на стенде; PR с контрактом для фронта.
+**DoD:** по коду — регистрация компании (платформенный админ) и логин с JWT/bcrypt закрыты; на **staging** — smoke вручную; в ответе логина поле **`token`** — JWT (контракт для фронта: тот же ключ, другое содержимое).
 
 ### День 3 (Ср)
 
 - [x] **Tenant isolation** для документов и согласований — реализована проверка `company_id` в **`documents.controller`** / **`approvals.controller`**. Осталось: автотест или чеклист «нельзя читать чужой companyId»; пройти по остальным роутам при росте API.
-- [ ] **`GET /api/users/me`**: расширить DTO — **`companyId`**, **`mustChangePassword`** (сейчас в ответе только `fullName`, `email`, `position`, `roleLabel`; флаг временного пароля есть на **login**, но не в профиле).
+- [x] **`GET /api/users/me`**: в DTO уже есть **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position`.
+- [ ] **`GET /api/users/me`**: добавить **`mustChangePassword`** / согласованный флаг (сейчас **`isTemporaryPassword`** есть только на **login**, не в профиле).
 - [x] **`resolveEmployeeContextByToken`** в `auth-context.ts` — готово; дальше — подключать везде единообразно + опционально **`requireCompany`** (отказ, если нет `company_id` там, где это обязательно).
 
 **DoD:** `GET /users/me` отдаёт согласованные поля с фронтом и с контекстом в документах; тест на изоляцию — по возможности.
@@ -97,7 +102,7 @@
 
 ### День 5 (Пт) — внутренняя веха недели 1
 
-- [ ] **Первый деплой staging**: API по **HTTPS**, миграции проходят, smoke: **login** (+ **register**, когда появится). *(В репо нет зафиксированного процесса деплоя.)*
+- [ ] **Первый деплой staging**: API по **HTTPS**, миграции проходят, smoke: **login** + **создание компании** платформенным админом (`POST /api/admin/companies`). *(В репо нет зафиксированного процесса деплоя.)*
 - [ ] **Секреты только через env**; **CORS** под домен фронта staging.
 - [ ] **`.env.example`** — расширить до полного списка из `DEPLOY.md` (сейчас файл минимальный).
 - [ ] **Runbook миграций** в `DEPLOY.md` финализировать.
@@ -150,7 +155,7 @@
 
 ### День 11 (Пн)
 
-- [ ] **`RBAC` middleware `requireAdmin`** для админских роутов. *(Сейчас роль проверяется точечно в контроллерах документов/согласований, отдельного middleware нет.)*
+- [x] **Платформенные админ-роуты**: **`requirePlatformAdmin`** для **`/api/admin/companies`** и **`/api/admin/employees`**. *(Отдельного универсального `requireAdmin` для сценариев «админ компании» в документах — по-прежнему точечные проверки в контроллерах.)*
 - [x] **Профиль**: **`PATCH /api/users/me`** (имя, email) — уже в **`auth.controller.ts`**.
 - [ ] Заготовка под **аватар** (поле в БД или флаг «позже» в PR — без противоречия с Day 12).
 
@@ -240,4 +245,4 @@
 
 ---
 
-*Аудит беклога против репозитория: апрель 2026.*
+*Аудит беклога против репозитория: апрель 2026; обновление по JWT, bcrypt, компаниям и `requirePlatformAdmin` — актуально к текущему `main`.*
