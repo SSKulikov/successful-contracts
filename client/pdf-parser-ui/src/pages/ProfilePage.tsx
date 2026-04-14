@@ -1,6 +1,6 @@
 import { LockOutlined, MailOutlined, UserOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Avatar, Button, Card, Form, Input, Space, Typography, message } from "antd";
+import { Alert, Avatar, Button, Card, Form, Input, Space, Typography, message } from "antd";
 import {
   AUTH_TOKEN_STORAGE_KEY,
   AUTH_USER_STORAGE_KEY,
@@ -36,9 +36,16 @@ export function ProfilePage() {
   });
   const changePasswordMutation = useMutation({
     mutationFn: profileApi.changeMyPassword,
-    onSuccess: () => {
+    onSuccess: async () => {
       message.success("Пароль обновлен");
       passwordForm.resetFields();
+      try {
+        const updated = await profileApi.getMyProfile();
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(updated));
+        queryClient.invalidateQueries({ queryKey: ["my-profile"] });
+      } catch {
+        queryClient.invalidateQueries({ queryKey: ["my-profile"] });
+      }
     },
     onError: () => {
       message.error("Не удалось обновить пароль. Проверьте текущий пароль.");
@@ -71,6 +78,15 @@ export function ProfilePage() {
           Управление учетной записью пользователя.
         </Typography.Paragraph>
       </div>
+
+      {currentProfile?.mustChangePassword ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Требуется смена пароля"
+          description="Вы вошли по одноразовому или сброшенному паролю. Установите новый пароль в блоке ниже."
+        />
+      ) : null}
 
       <Card>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>

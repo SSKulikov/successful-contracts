@@ -20,7 +20,7 @@
 | **Tenant** | В `documents.controller.ts` и `approvals.controller.ts` — фильтры и проверки `company_id` / `employee.companyId`. |
 | **Сотрудники (платф. админ)** | `GET/POST /api/admin/employees` в `admin.controller.ts` (защита `requirePlatformAdmin`); роли в `roles_json`; bcrypt одноразового пароля при создании. |
 | **Redis** | `src/cache/redis.ts` — кэш документов/согласований, опционально хеши паролей; при отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
-| **Профиль / DTO** | `GET/PATCH /users/me` отдаёт **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position` (см. `mapEmployeeProfile`). |
+| **Профиль / DTO** | `GET/PATCH /users/me` отдаёт **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position`, **`mustChangePassword`** (см. `mapEmployeeProfile`). |
 | **Временный пароль** | Колонка `is_temporary_password`; логин отдаёт `isTemporaryPassword`; фронт предупреждает — **серверной блокировки mutation до смены пароля пока нет**. |
 
 Ещё **нет** в репо (остаётся в беклоге): публичная саморегистрация компании (если понадобится), **`/api/admin/routes`** на сервере (вызов только во фронте `adminApi`), **уведомления**, **soft delete** сотрудников, **PATCH/reset-password** для employee, аватар, CI, rate limit / security headers. **`docs/DEPLOY.md`**, **`docker-compose.yml`**, **`Dockerfile`**, **`GET /health`**, **`GET /api/health`**, **CORS из `CORS_ORIGIN`** (`utils/cors-config.ts`) — есть.
@@ -33,7 +33,7 @@
 |----------|----------------|
 | **Общая дорожная карта** | Фундамент: деплой/staging, Docker, компания и auth, tenant (`companyId`), сотрудники, RBAC, маршруты согласования, профиль/аватар, уведомления, безопасность и прод в конце. |
 | **ROADMAP-DELTA** | Расширять существующий Express (`routes.ts`, контроллеры), Prisma или raw SQL в том же стиле что `employees`. Dev2: компания, админка/auth, уведомления, compose/CI/env. Стык: стабильные DTO `companyId`, ролей, маршрутов для Dev1. |
-| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш, **компании + регистрация через платформенного админа**, **JWT + bcrypt**, **companyId/role в DTO**, контекст сотрудника и **`requirePlatformAdmin`** — **уже в коде**. Остаётся: **`mustChangePassword` в профиле** и серверная блокировка по временному паролю, **маршруты согласования в API**, уведомления, инфраструктура прода, CI. Деплой-док, compose и **health** — добавлены. |
+| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш, **компании + регистрация через платформенного админа**, **JWT + bcrypt**, **companyId/role/mustChangePassword в DTO**, контекст сотрудника и **`requirePlatformAdmin`** — **уже в коде**. Остаётся: **серверная блокировка mutation по временному паролю**, **маршруты согласования в API**, уведомления, инфраструктура прода, CI. Деплой-док, compose и **health** — добавлены. |
 
 **Правила каждого дня**
 
@@ -87,7 +87,7 @@
 
 - [x] **Tenant isolation** для документов и согласований — реализована проверка `company_id` в **`documents.controller`** / **`approvals.controller`**. Осталось: автотест или чеклист «нельзя читать чужой companyId»; пройти по остальным роутам при росте API.
 - [x] **`GET /api/users/me`**: в DTO уже есть **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position`.
-- [ ] **`GET /api/users/me`**: добавить **`mustChangePassword`** / согласованный флаг (сейчас **`isTemporaryPassword`** есть только на **login**, не в профиле).
+- [x] **`GET /api/users/me`**: флаг **`mustChangePassword`** (по `is_temporary_password` в БД); на **login** по-прежнему **`isTemporaryPassword`** в корне ответа; в **`user`** те же данные, что и в профиле.
 - [x] **`resolveEmployeeContextByToken`** в `auth-context.ts` — готово; дальше — подключать везде единообразно + опционально **`requireCompany`** (отказ, если нет `company_id` там, где это обязательно).
 
 **DoD:** `GET /users/me` отдаёт согласованные поля с фронтом и с контекстом в документах; тест на изоляцию — по возможности.

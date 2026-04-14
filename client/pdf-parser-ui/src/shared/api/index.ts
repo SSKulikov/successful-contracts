@@ -135,6 +135,8 @@ export type UserProfile = {
   companyId: number | null;
   /** Роль в приложении: администратор компании/платформы или сотрудник */
   role: "admin" | "employee";
+  /** Нужно сменить пароль (одноразовый / сброс); то же, что `isTemporaryPassword` в ответе login, дублируется в профиле. */
+  mustChangePassword: boolean;
 };
 
 export type AuthUser = UserProfile;
@@ -154,7 +156,10 @@ export function getStoredUserProfile(): UserProfile | null {
       typeof parsed.email === "string" &&
       (parsed.role === "admin" || parsed.role === "employee")
     ) {
-      return parsed;
+      return {
+        ...parsed,
+        mustChangePassword: parsed.mustChangePassword === true
+      };
     }
     return null;
   } catch {
@@ -361,7 +366,8 @@ const mockProfile: UserProfile = {
   email: "demo@company.ru",
   roleLabel: "Сотрудник",
   companyId: 1,
-  role: "employee"
+  role: "employee",
+  mustChangePassword: false
 };
 
 const mockEmployees: EmployeeRow[] = [

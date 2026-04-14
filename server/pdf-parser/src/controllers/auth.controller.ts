@@ -24,7 +24,9 @@ export function mapEmployeeProfile(row: EmployeeAccountRow) {
     position: row.position,
     roleLabel,
     companyId: row.company_id,
-    role: isAdmin ? ("admin" as const) : ("employee" as const)
+    role: isAdmin ? ("admin" as const) : ("employee" as const),
+    /** Согласовано с `isTemporaryPassword` на login: нужно сменить пароль после одноразового. */
+    mustChangePassword: row.is_temporary_password === 1
   };
 }
 
