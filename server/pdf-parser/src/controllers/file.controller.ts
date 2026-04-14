@@ -2,15 +2,21 @@ import { Request, Response } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import {
+  buildParsePipelineCacheKey,
+  getJson,
+  getParsePipelineCacheTtlSeconds,
+  setJson,
+  setParseNormalizedDataHash
+} from "../cache/redis";
 import { PdfService } from "../services/PdfService";
 import { WordService } from "../services/WordService";
 import { RegExService } from "../services/RegExService";
 import { logger } from "../utils/logger";
 import { ValidatorService } from "../services/ValidatorService";
-import { allRequisitesPrompt } from "../consts/prompts";
 import { parsedData } from "../dto";
-import { scheduler } from "node:timers/promises";
-import {GigaChatService} from "../services/GigaChatService";
+import { GigaChatService } from "../services/GigaChatService";
+import { sha256HexOfFileBytes, sha256HexOfStableJson } from "../utils/stableContentHash";
 
 const pdf = new PdfService();
 const word = new WordService();
@@ -135,6 +141,12 @@ async function parseFunc(filename: string, fileExtension: string) {
   return validator.validateParsedData(parsedData);
 }
 
+function isPipelineCachedPayload(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  return o.supplier != null && typeof o.supplier === "object" && o.customer != null && typeof o.customer === "object";
+}
+
 // Функция для определения папки хранения в зависимости от типа файла
 const getUploadDir = (mimetype: string) => {
   if (mimetype === "application/pdf")
@@ -178,13 +190,34 @@ export const parseFile = (req: Request, res: Response) => {
     try {
       const fileExtension = path.extname(req.file.originalname); // Получаем расширение файла
       const fileNameWithoutExtension = path.parse(req.file.filename).name; // Получаем имя файла без расширения
-      const parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension);
-      // Возвращаем parsedJson вместе с другими данными
+
+      const fileBytes = await fs.promises.readFile(req.file.path);
+      const contentSha256Hex = sha256HexOfFileBytes(fileBytes);
+      const pipelineCacheKey = buildParsePipelineCacheKey(contentSha256Hex);
+
+      let parsedJson: Awaited<ReturnType<typeof parseFunc>>;
+      let pipelineCacheHit = false;
+
+      const cached = await getJson<unknown>(pipelineCacheKey);
+      if (cached && isPipelineCachedPayload(cached)) {
+        parsedJson = cached as Awaited<ReturnType<typeof parseFunc>>;
+        pipelineCacheHit = true;
+      } else {
+        parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension);
+        await setJson(pipelineCacheKey, parsedJson, getParsePipelineCacheTtlSeconds());
+      }
+
+      const normalizedContentSha256 = sha256HexOfStableJson(parsedJson);
+      await setParseNormalizedDataHash(req.file.filename, normalizedContentSha256);
+
       res.json({
         message: "Файл загружен",
         filename: req.file.filename,
         path: req.file.path,
-        parsedJson, // Добавляем parsedJson в ответ
+        parsedJson,
+        normalizedContentSha256,
+        contentSha256: contentSha256Hex,
+        pipelineCacheHit
       });
     } catch (error) {
       const message =

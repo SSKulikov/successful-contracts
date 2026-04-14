@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
 import type { EmployeeAccountRow } from "../types/employee-account";
 import { signAccessToken } from "../utils/jwt";
@@ -80,7 +79,6 @@ export async function login(req: Request, res: Response): Promise<void> {
         employee.id
       );
     }
-    await setPasswordHashRedis(employee.id, authResult.bcryptHash);
 
     if (employee.status !== "Активен") {
       res.status(403).json({ message: "Пользователь неактивен" });
@@ -179,7 +177,6 @@ export async function changeMyPassword(req: Request, res: Response): Promise<voi
       newHash,
       employee.id
     );
-    await setPasswordHashRedis(employee.id, newHash);
 
     res.json({ message: "Пароль обновлен" });
   } catch (error) {

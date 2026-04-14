@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
 import { hashPassword, isBcryptHash } from "../utils/passwords";
 import { logger } from "../utils/logger";
@@ -57,9 +56,6 @@ async function ensurePlatformDemoAdmin() {
         migrated,
         existing[0].id
       );
-      await setPasswordHashRedis(existing[0].id, migrated);
-    } else {
-      await setPasswordHashRedis(existing[0].id, existing[0].password_value);
     }
     return;
   }
@@ -76,13 +72,6 @@ async function ensurePlatformDemoAdmin() {
     "Активен",
     null
   );
-  const ins = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-    `SELECT id FROM employees WHERE email = ? LIMIT 1`,
-    PLATFORM_DEMO_ADMIN_EMAIL
-  );
-  if (ins[0]) {
-    await setPasswordHashRedis(ins[0].id, passwordHash);
-  }
   logger.info(`✅ Создана учётная запись платформенного админа: ${PLATFORM_DEMO_ADMIN_EMAIL}`);
 }
 
@@ -201,14 +190,6 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       });
     } else {
       await prisma.$executeRawUnsafe(insertSql, ...insertParams);
-    }
-
-    const idRow = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM employees WHERE email = ? LIMIT 1`,
-      email
-    );
-    if (idRow[0]) {
-      await setPasswordHashRedis(idRow[0].id, passwordHash);
     }
 
     logger.info(`✅ Создан сотрудник: ${email}`);

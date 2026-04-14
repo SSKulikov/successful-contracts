@@ -13,13 +13,13 @@
 | Область | Факт в репо |
 |---------|-------------|
 | **Auth** | `POST /api/auth/login`, `GET/PATCH /api/users/me`, `POST /api/users/me/change-password` в `auth.controller.ts`; защищённые роуты через **`requireAuth`** (`req.authEmployee`, `req.authContext`). **Bearer:** основной токен — **JWT** (HS256, `utils/jwt.ts`): в payload — `companyId`, `role`, `sub` = id сотрудника; поддерживаются **legacy**-строки из таблицы **`auth_sessions`** (`utils/auth-token.ts`). Переменные **`JWT_SECRET`**, **`JWT_EXPIRES_IN`**. |
-| **Пароли** | **bcrypt** в `employees.password_value` (`utils/passwords.ts`); опционально дублирование хеша в **Redis** (`setPasswordHashRedis`). |
+| **Пароли** | **bcrypt** в `employees.password_value` (`utils/passwords.ts`). |
 | **Компании и регистрация** | Таблица **`companies`**, **`employees.company_id`**. Регистрация компании: **`POST /api/admin/companies`** (транзакция company + первый сотрудник-**admin**), только для **платформенного администратора** (`requireAuth` → **`requirePlatformAdmin`**). Публичного **`POST /api/auth/register-company`** нет — осознанно (B2B SaaS). |
 | **Инварианты** | Один администратор на компанию (`company-roles.ts`, проверки в `admin.controller` / `companies.controller`). |
 | **Контекст сотрудника** | `resolveEmployeeContextByToken` в `utils/auth-context.ts` через **`getEmployeeByAuthToken`**: `companyId`, `role` admin/employee (данные из БД после проверки токена). |
 | **Tenant** | В `documents.controller.ts` и `approvals.controller.ts` — фильтры и проверки `company_id` / `employee.companyId`. |
 | **Сотрудники (платф. админ)** | `GET/POST /api/admin/employees` в `admin.controller.ts` (защита `requirePlatformAdmin`); роли в `roles_json`; bcrypt одноразового пароля при создании. |
-| **Redis** | `src/cache/redis.ts` — кэш документов/согласований, опционально хеши паролей; при отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
+| **Redis** | `src/cache/redis.ts` — кэш документов/согласований; при отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
 | **Профиль / DTO** | `GET/PATCH /users/me` отдаёт **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position`, **`mustChangePassword`** (см. `mapEmployeeProfile`). |
 | **Временный пароль** | Колонка `is_temporary_password`; логин отдаёт `isTemporaryPassword`; фронт предупреждает — **серверной блокировки mutation до смены пароля пока нет**. |
 
@@ -76,7 +76,7 @@
 ### День 2 (Вт)
 
 - [x] **Модель Company + User/Admin**: при создании компании первый пользователь — **админ компании** (`roles_json` содержит `admin`), транзакция в **`createCompany`** (`companies.controller.ts`).
-- [x] **Регистрация компании в API**: реализовано как **`POST /api/admin/companies`** (не `/api/auth/register-company`): валидация, **bcrypt** пароля админа, транзакция company + employee, дублирование хеша в Redis при наличии. Доступ только с **`requirePlatformAdmin`** (B2B SaaS). Публичная саморегистрация — отдельное решение продукта, в беклоге не закрыта.
+- [x] **Регистрация компании в API**: реализовано как **`POST /api/admin/companies`** (не `/api/auth/register-company`): валидация, **bcrypt** пароля админа, транзакция company + employee. Доступ только с **`requirePlatformAdmin`** (B2B SaaS). Публичная саморегистрация — отдельное решение продукта, в беклоге не закрыта.
 - [x] **`POST /api/auth/login`**: **JWT** access-токен + **legacy**-сессии `auth_sessions` для старых клиентов; **хэш паролей bcrypt**; `Authorization: Bearer` без изменений.
 - [x] Общий **`requireAuth`** (`middleware/requireAuth.ts`): Bearer → `req.authEmployee` + `req.authContext`; контроллеры документов, согласований и профиля без дублирования проверок. **`/api/admin/*`**: цепочка **`requireAuth` → `requirePlatformAdmin`** (без второго запроса к БД при валидном токене).
 - [x] **Tenant в контексте**: `companyId` и `role` в **`resolveEmployeeContextByToken`**; **`GET /users/me`** отдаёт **`companyId`** и **`role`** в DTO (`mapEmployeeProfile`). Расширение **`mustChangePassword`** — см. день 3.

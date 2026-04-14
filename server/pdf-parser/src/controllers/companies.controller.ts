@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
 import { hashPassword } from "../utils/passwords";
 import { ensureEmployeesTable, generateOneTimePassword } from "./admin.controller";
@@ -168,14 +167,6 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
         throw new Error("COMPANY_ADMIN_COUNT_INVALID");
       }
     });
-
-    const empRow = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-      `SELECT id FROM employees WHERE email = ? LIMIT 1`,
-      email
-    );
-    if (empRow[0]) {
-      await setPasswordHashRedis(empRow[0].id, passwordHash);
-    }
 
     logger.info(`✅ Зарегистрирована компания: ${inn}`);
     res.status(201).json({ message: "Компания зарегистрирована" });
@@ -376,7 +367,6 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
       passwordHash,
       adminRows[0].id
     );
-    await setPasswordHashRedis(adminRows[0].id, passwordHash);
 
     logger.info(`✅ Сброшен пароль администратора компании id=${id}`);
     res.json({

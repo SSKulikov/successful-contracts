@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import express from "express";
 import fileRoutes from "./routes";
 import cors from "cors";
@@ -6,7 +8,12 @@ import dotenv from "dotenv";
 import { getHealth } from "./controllers/health.controller";
 import { getCorsOptions } from "./utils/cors-config";
 
-dotenv.config();
+// Сначала `.env` в корне репозитория (рядом с docker-compose), затем `server/pdf-parser/.env` — второй перекрывает первый.
+// Иначе при `npm start` из `server/pdf-parser` переменные из корня не подхватывались, в т.ч. REDIS_URL.
+const envFromRepoRoot = path.resolve(__dirname, "../../../.env");
+const envFromPdfParser = path.resolve(__dirname, "../.env");
+if (fs.existsSync(envFromRepoRoot)) dotenv.config({ path: envFromRepoRoot });
+if (fs.existsSync(envFromPdfParser)) dotenv.config({ path: envFromPdfParser });
 const app = express();
 const PORT = 3003;
 

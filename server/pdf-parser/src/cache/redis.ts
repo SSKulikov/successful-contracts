@@ -111,34 +111,42 @@ export async function invalidateMyDocumentsListCaches(companyId: number | null):
   await scanDelByPattern(getMyDocumentsListCachePattern(companyId));
 }
 
-const PASSWORD_HASH_KEY = (employeeId: number) => `auth:password:bcrypt:${employeeId}`;
+const PARSE_NORM_SHA256_KEY_PREFIX = "parse:norm-sha256:";
+const DEFAULT_PARSE_NORM_HASH_TTL_SECONDS = 60 * 60 * 24 * 7;
 
-/** Дублирует bcrypt-хеш пароля (без TTL). Источник истины — MySQL; Redis для быстрого доступа и единой модели с кэшем. */
-export async function setPasswordHashRedis(employeeId: number, bcryptHash: string): Promise<void> {
+/**
+ * Сохраняет SHA-256 нормализованного JSON результата парсинга (после LLM + ValidatorService).
+ * Ключ — имя загруженного файла в storage (`req.file.filename`), значение — hex SHA-256.
+ */
+const DEFAULT_PARSE_PIPELINE_CACHE_PREFIX = "parse:pipeline";
+const DEFAULT_PARSE_PIPELINE_CACHE_TTL_SECONDS = 60 * 60 * 24 * 3;
+
+/** Ключ кэша полного пайплайна (OCR / чанки / GigaChat): `префикс_хэш-содержимого`. Префикс — `PARSE_PIPELINE_CACHE_KEY_PREFIX`. */
+export function buildParsePipelineCacheKey(contentSha256Hex: string): string {
+  const prefix =
+    process.env.PARSE_PIPELINE_CACHE_KEY_PREFIX?.trim() || DEFAULT_PARSE_PIPELINE_CACHE_PREFIX;
+  return `${prefix}_${contentSha256Hex}`;
+}
+
+export function getParsePipelineCacheTtlSeconds(): number {
+  const raw = process.env.PARSE_PIPELINE_CACHE_TTL_SECONDS;
+  const n = raw !== undefined ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_PARSE_PIPELINE_CACHE_TTL_SECONDS;
+}
+
+export async function setParseNormalizedDataHash(uploadFileName: string, sha256Hex: string): Promise<void> {
   const client = await connectIfNeeded();
   if (!client) return;
 
+  const ttlRaw = process.env.PARSE_RESULT_HASH_TTL_SECONDS;
+  const parsed = ttlRaw !== undefined ? Number(ttlRaw) : NaN;
+  const ttlSec =
+    Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PARSE_NORM_HASH_TTL_SECONDS;
+
+  const key = `${PARSE_NORM_SHA256_KEY_PREFIX}${uploadFileName}`;
   try {
-    await client.set(PASSWORD_HASH_KEY(employeeId), bcryptHash);
+    await client.set(key, sha256Hex, "EX", ttlSec);
   } catch (error) {
-    logger.error(`❌ Redis setPasswordHashRedis failed for employee ${employeeId}: ${error}`);
+    logger.error(`❌ Redis setParseNormalizedDataHash failed for "${key}": ${error}`);
   }
 }
-
-export async function getPasswordHashRedis(employeeId: number): Promise<string | null> {
-  const client = await connectIfNeeded();
-  if (!client) return null;
-
-  try {
-    const v = await client.get(PASSWORD_HASH_KEY(employeeId));
-    return v ?? null;
-  } catch (error) {
-    logger.error(`❌ Redis getPasswordHashRedis failed for employee ${employeeId}: ${error}`);
-    return null;
-  }
-}
-
-export async function deletePasswordHashRedis(employeeId: number): Promise<void> {
-  await del(PASSWORD_HASH_KEY(employeeId));
-}
-
