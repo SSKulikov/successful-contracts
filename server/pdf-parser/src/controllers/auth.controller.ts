@@ -1,40 +1,13 @@
-import { randomUUID } from "crypto";
 import { Request, Response } from "express";
+import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
+import type { EmployeeAccountRow } from "../types/employee-account";
+import { getEmployeeByAuthToken } from "../utils/auth-token";
+import { getBearerToken } from "../utils/auth-context";
+import { signAccessToken } from "../utils/jwt";
+import { hashPassword, verifyPasswordOrMigrate } from "../utils/passwords";
 import { ensureAuthSessionsTable } from "./admin.controller";
 import { logger } from "../utils/logger";
-
-type EmployeeAccountRow = {
-  id: number;
-  full_name: string;
-  email: string;
-  position: string;
-  roles_json: string;
-  password_value: string;
-  is_temporary_password: 0 | 1;
-  status: "Активен" | "Неактивен";
-  company_id: number | null;
-};
-
-function getBearerToken(req: Request) {
-  const authHeader = req.headers.authorization ?? "";
-  if (!authHeader.startsWith("Bearer ")) return null;
-  return authHeader.slice("Bearer ".length).trim();
-}
-
-async function getEmployeeByToken(token: string): Promise<EmployeeAccountRow | null> {
-  const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
-    `
-      SELECT e.id, e.full_name, e.email, e.position, e.roles_json, e.password_value, e.is_temporary_password, e.status, e.company_id
-      FROM auth_sessions s
-      JOIN employees e ON e.id = s.employee_id
-      WHERE s.token = ?
-      LIMIT 1
-    `,
-    token
-  );
-  return rows[0] ?? null;
-}
 
 /** DTO пользователя для login / GET/PATCH /users/me */
 export function mapEmployeeProfile(row: EmployeeAccountRow) {
@@ -55,6 +28,16 @@ export function mapEmployeeProfile(row: EmployeeAccountRow) {
     companyId: row.company_id,
     role: isAdmin ? ("admin" as const) : ("employee" as const)
   };
+}
+
+function appRoleFromRow(row: EmployeeAccountRow): "admin" | "employee" {
+  let roles: string[] = [];
+  try {
+    roles = JSON.parse(row.roles_json ?? "[]");
+  } catch {
+    roles = [];
+  }
+  return roles.includes("admin") ? "admin" : "employee";
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
@@ -79,18 +62,37 @@ export async function login(req: Request, res: Response): Promise<void> {
     );
     const employee = rows[0];
 
-    if (!employee || employee.password_value !== password) {
+    if (!employee) {
       res.status(401).json({ message: "Неверный email или пароль" });
       return;
     }
+
+    const authResult = await verifyPasswordOrMigrate(password, employee.password_value);
+    if (!authResult.ok) {
+      res.status(401).json({ message: "Неверный email или пароль" });
+      return;
+    }
+
+    if (authResult.bcryptHash !== employee.password_value) {
+      await prisma.$executeRawUnsafe(
+        "UPDATE employees SET password_value = ? WHERE id = ?",
+        authResult.bcryptHash,
+        employee.id
+      );
+    }
+    await setPasswordHashRedis(employee.id, authResult.bcryptHash);
 
     if (employee.status !== "Активен") {
       res.status(403).json({ message: "Пользователь неактивен" });
       return;
     }
 
-    const token = randomUUID();
-    await prisma.$executeRawUnsafe("INSERT INTO auth_sessions (token, employee_id) VALUES (?, ?)", token, employee.id);
+    const role = appRoleFromRow(employee);
+    const token = signAccessToken({
+      employeeId: employee.id,
+      companyId: employee.company_id ?? null,
+      role
+    });
 
     res.json({
       token,
@@ -111,7 +113,7 @@ export async function getMyProfile(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const employee = await getEmployeeByToken(token);
+    const employee = await getEmployeeByAuthToken(token);
     if (!employee) {
       res.status(401).json({ message: "Сессия не найдена" });
       return;
@@ -132,7 +134,7 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
       return;
     }
 
-    const currentEmployee = await getEmployeeByToken(token);
+    const currentEmployee = await getEmployeeByAuthToken(token);
     if (!currentEmployee) {
       res.status(401).json({ message: "Сессия не найдена" });
       return;
@@ -178,7 +180,7 @@ export async function changeMyPassword(req: Request, res: Response): Promise<voi
       return;
     }
 
-    const employee = await getEmployeeByToken(token);
+    const employee = await getEmployeeByAuthToken(token);
     if (!employee) {
       res.status(401).json({ message: "Сессия не найдена" });
       return;
@@ -192,16 +194,23 @@ export async function changeMyPassword(req: Request, res: Response): Promise<voi
       return;
     }
 
-    if (employee.password_value !== currentPassword) {
+    const cur = await verifyPasswordOrMigrate(currentPassword, employee.password_value);
+    if (!cur.ok) {
       res.status(400).json({ message: "Текущий пароль указан неверно" });
       return;
     }
 
+    if (cur.bcryptHash !== employee.password_value) {
+      await prisma.$executeRawUnsafe("UPDATE employees SET password_value = ? WHERE id = ?", cur.bcryptHash, employee.id);
+    }
+
+    const newHash = await hashPassword(newPassword);
     await prisma.$executeRawUnsafe(
       "UPDATE employees SET password_value = ?, is_temporary_password = 0 WHERE id = ?",
-      newPassword,
+      newHash,
       employee.id
     );
+    await setPasswordHashRedis(employee.id, newHash);
 
     res.json({ message: "Пароль обновлен" });
   } catch (error) {

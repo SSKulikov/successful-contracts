@@ -1,5 +1,5 @@
 import { Request } from "express";
-import prisma from "../prisma";
+import { getEmployeeByAuthToken } from "./auth-token";
 
 export type EmployeeAuthContext = {
   id: number;
@@ -15,20 +15,7 @@ export function getBearerToken(req: Request) {
 }
 
 export async function resolveEmployeeContextByToken(token: string): Promise<EmployeeAuthContext | null> {
-  const rows = await prisma.$queryRawUnsafe<
-    Array<{ id: number; full_name: string; roles_json: string; company_id: number | null }>
-  >(
-    `
-      SELECT e.id, e.full_name, e.roles_json, e.company_id
-      FROM auth_sessions s
-      JOIN employees e ON e.id = s.employee_id
-      WHERE s.token = ?
-      LIMIT 1
-    `,
-    token
-  );
-
-  const employee = rows[0];
+  const employee = await getEmployeeByAuthToken(token);
   if (!employee) return null;
 
   let roles: string[] = [];

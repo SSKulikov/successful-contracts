@@ -111,3 +111,34 @@ export async function invalidateMyDocumentsListCaches(companyId: number | null):
   await scanDelByPattern(getMyDocumentsListCachePattern(companyId));
 }
 
+const PASSWORD_HASH_KEY = (employeeId: number) => `auth:password:bcrypt:${employeeId}`;
+
+/** Дублирует bcrypt-хеш пароля (без TTL). Источник истины — MySQL; Redis для быстрого доступа и единой модели с кэшем. */
+export async function setPasswordHashRedis(employeeId: number, bcryptHash: string): Promise<void> {
+  const client = await connectIfNeeded();
+  if (!client) return;
+
+  try {
+    await client.set(PASSWORD_HASH_KEY(employeeId), bcryptHash);
+  } catch (error) {
+    logger.error(`❌ Redis setPasswordHashRedis failed for employee ${employeeId}: ${error}`);
+  }
+}
+
+export async function getPasswordHashRedis(employeeId: number): Promise<string | null> {
+  const client = await connectIfNeeded();
+  if (!client) return null;
+
+  try {
+    const v = await client.get(PASSWORD_HASH_KEY(employeeId));
+    return v ?? null;
+  } catch (error) {
+    logger.error(`❌ Redis getPasswordHashRedis failed for employee ${employeeId}: ${error}`);
+    return null;
+  }
+}
+
+export async function deletePasswordHashRedis(employeeId: number): Promise<void> {
+  await del(PASSWORD_HASH_KEY(employeeId));
+}
+

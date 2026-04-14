@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
+import { hashPassword } from "../utils/passwords";
 import { ensureEmployeesTable, generateOneTimePassword } from "./admin.controller";
 import { logger } from "../utils/logger";
 import { companyAdminRoleSqlCondition, countCompanyAdminsTx } from "../utils/company-roles";
@@ -131,6 +133,8 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const passwordHash = await hashPassword(password);
+
     await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`INSERT INTO companies (name, inn) VALUES (?, ?)`, companyName, inn);
 
@@ -154,7 +158,7 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
         email,
         "Администратор",
         JSON.stringify(["admin"]),
-        password,
+        passwordHash,
         0,
         "Активен",
         companyId
@@ -164,6 +168,14 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
         throw new Error("COMPANY_ADMIN_COUNT_INVALID");
       }
     });
+
+    const empRow = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM employees WHERE email = ? LIMIT 1`,
+      email
+    );
+    if (empRow[0]) {
+      await setPasswordHashRedis(empRow[0].id, passwordHash);
+    }
 
     logger.info(`✅ Зарегистрирована компания: ${inn}`);
     res.status(201).json({ message: "Компания зарегистрирована" });
@@ -327,6 +339,7 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
     }
 
     const oneTimePassword = generateOneTimePassword();
+    const passwordHash = await hashPassword(oneTimePassword);
 
     const adminRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
       `
@@ -360,9 +373,10 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
       SET password_value = ?, is_temporary_password = 1
       WHERE id = ?
       `,
-      oneTimePassword,
+      passwordHash,
       adminRows[0].id
     );
+    await setPasswordHashRedis(adminRows[0].id, passwordHash);
 
     logger.info(`✅ Сброшен пароль администратора компании id=${id}`);
     res.json({

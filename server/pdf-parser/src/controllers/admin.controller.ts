@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { setPasswordHashRedis } from "../cache/redis";
 import prisma from "../prisma";
+import { hashPassword, isBcryptHash } from "../utils/passwords";
 import { logger } from "../utils/logger";
 import { countCompanyAdminsTx, lockCompanyRowForUpdate } from "../utils/company-roles";
 
@@ -43,25 +45,44 @@ export async function ensureEmployeesTable() {
 export const PLATFORM_DEMO_ADMIN_EMAIL = "platform-admin@docflow.local";
 
 async function ensurePlatformDemoAdmin() {
-  const existing = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-    `SELECT id FROM employees WHERE email = ? LIMIT 1`,
+  const existing = await prisma.$queryRawUnsafe<Array<{ id: number; password_value: string }>>(
+    `SELECT id, password_value FROM employees WHERE email = ? LIMIT 1`,
     PLATFORM_DEMO_ADMIN_EMAIL
   );
   if (existing[0]) {
+    if (!isBcryptHash(existing[0].password_value)) {
+      const migrated = await hashPassword(existing[0].password_value);
+      await prisma.$executeRawUnsafe(
+        `UPDATE employees SET password_value = ? WHERE id = ?`,
+        migrated,
+        existing[0].id
+      );
+      await setPasswordHashRedis(existing[0].id, migrated);
+    } else {
+      await setPasswordHashRedis(existing[0].id, existing[0].password_value);
+    }
     return;
   }
 
+  const passwordHash = await hashPassword("111");
   await prisma.$executeRawUnsafe(
     `INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     "Администратор платформы",
     PLATFORM_DEMO_ADMIN_EMAIL,
     "Администратор",
     JSON.stringify(["admin"]),
-    "111",
+    passwordHash,
     0,
     "Активен",
     null
   );
+  const ins = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+    `SELECT id FROM employees WHERE email = ? LIMIT 1`,
+    PLATFORM_DEMO_ADMIN_EMAIL
+  );
+  if (ins[0]) {
+    await setPasswordHashRedis(ins[0].id, passwordHash);
+  }
   logger.info(`✅ Создана учётная запись платформенного админа: ${PLATFORM_DEMO_ADMIN_EMAIL}`);
 }
 
@@ -141,6 +162,8 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
         ? body.oneTimePassword.trim()
         : generateOneTimePassword();
 
+    const passwordHash = await hashPassword(oneTimePassword);
+
     const insertSql =
       "INSERT INTO employees (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     const insertParams = [
@@ -148,7 +171,7 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       email,
       position,
       JSON.stringify(roles),
-      oneTimePassword,
+      passwordHash,
       1,
       "Активен",
       companyId
@@ -178,6 +201,14 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       });
     } else {
       await prisma.$executeRawUnsafe(insertSql, ...insertParams);
+    }
+
+    const idRow = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM employees WHERE email = ? LIMIT 1`,
+      email
+    );
+    if (idRow[0]) {
+      await setPasswordHashRedis(idRow[0].id, passwordHash);
     }
 
     logger.info(`✅ Создан сотрудник: ${email}`);
