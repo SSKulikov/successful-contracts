@@ -19,11 +19,11 @@
 | **Контекст сотрудника** | `resolveEmployeeContextByToken` в `utils/auth-context.ts` через **`getEmployeeByAuthToken`**: `companyId`, `role` admin/employee (данные из БД после проверки токена). |
 | **Tenant** | В `documents.controller.ts` и `approvals.controller.ts` — фильтры и проверки `company_id` / `employee.companyId`. |
 | **Сотрудники (платф. админ)** | `GET/POST /api/admin/employees` в `admin.controller.ts` (защита `requirePlatformAdmin`); роли в `roles_json`; bcrypt одноразового пароля при создании. |
-| **Redis** | `src/cache/redis.ts` — кэш документов/согласований; при отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
+| **Redis** | `src/cache/redis.ts` — кэш документов/согласований **+ кэш полного пайплайна парсинга** (OCR/чанки/GigaChat) по **SHA-256 содержимого файла** (ключ `parse:pipeline_{sha256}`, TTL 3 суток, настраивается через `PARSE_PIPELINE_CACHE_TTL_SECONDS`). Дублирование bcrypt-хешей паролей **удалено** — источник истины только MySQL. При отсутствии **`REDIS_URL`** — работа без Redis без падения процесса. |
 | **Профиль / DTO** | `GET/PATCH /users/me` отдаёт **`companyId`**, **`role`**, `roleLabel`, `fullName`, `email`, `position`, **`mustChangePassword`** (см. `mapEmployeeProfile`). |
 | **Временный пароль** | Колонка `is_temporary_password`; логин отдаёт `isTemporaryPassword`; фронт предупреждает — **серверной блокировки mutation до смены пароля пока нет**. |
 
-Ещё **нет** в репо (остаётся в беклоге): публичная саморегистрация компании (если понадобится), **`/api/admin/routes`** на сервере (вызов только во фронте `adminApi`), **уведомления**, **soft delete** сотрудников, **PATCH/reset-password** для employee, аватар, CI, rate limit / security headers. **`docs/DEPLOY.md`**, **`docker-compose.yml`**, **`Dockerfile`**, **`GET /health`**, **`GET /api/health`**, **CORS из `CORS_ORIGIN`** (`utils/cors-config.ts`) — есть.
+Ещё **нет** в репо (остаётся в беклоге): публичная саморегистрация компании (если понадобится), **`/api/admin/routes`** на сервере (вызов только во фронте `adminApi`), **уведомления**, **soft delete** сотрудников, **PATCH/reset-password** для employee, аватар, CI, rate limit / security headers. **`docs/DEPLOY.md`**, **`docker-compose.yml`**, **`Dockerfile`**, **`GET /health`**, **`GET /api/health`**, **CORS из `CORS_ORIGIN`** (`utils/cors-config.ts`), **кэш пайплайна парсинга по SHA-256 файла** — есть.
 
 ---
 
@@ -33,7 +33,7 @@
 |----------|----------------|
 | **Общая дорожная карта** | Фундамент: деплой/staging, Docker, компания и auth, tenant (`companyId`), сотрудники, RBAC, маршруты согласования, профиль/аватар, уведомления, безопасность и прод в конце. |
 | **ROADMAP-DELTA** | Расширять существующий Express (`routes.ts`, контроллеры), Prisma или raw SQL в том же стиле что `employees`. Dev2: компания, админка/auth, уведомления, compose/CI/env. Стык: стабильные DTO `companyId`, ролей, маршрутов для Dev1. |
-| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш, **компании + регистрация через платформенного админа**, **JWT + bcrypt**, **companyId/role/mustChangePassword в DTO**, контекст сотрудника и **`requirePlatformAdmin`** — **уже в коде**. Остаётся: **серверная блокировка mutation по временному паролю**, **маршруты согласования в API**, уведомления, инфраструктура прода, CI. Деплой-док, compose и **health** — добавлены. |
+| **Дельта по репо (обновлено)** | Документы, approvals, Redis-кэш (**+ кэш пайплайна парсинга по SHA-256 файла**, дублирование bcrypt-хешей в Redis **удалено**), **компании + регистрация через платформенного админа**, **JWT + bcrypt**, **companyId/role/mustChangePassword в DTO**, контекст сотрудника, **`requirePlatformAdmin`**, **CORS multi-origin** (`localhost:5173,3000`), **dotenv** из корня + `server/pdf-parser` — **уже в коде**. Остаётся: **серверная блокировка mutation по временному паролю**, **маршруты согласования в API**, уведомления, инфраструктура прода, CI. Деплой-док, compose и **health** — добавлены. |
 
 **Правила каждого дня**
 
@@ -53,8 +53,9 @@
 - [x] **`docs/DEPLOY.md`**: куда кладём фронт и бэк, домен staging, список переменных `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `PUBLIC_APP_URL`, `CORS_ORIGIN` (как в §6 ROADMAP-DELTA). *(Файл: `docs/DEPLOY.md`.)*
 - [x] **`docker-compose`** (минимум): `api` + MySQL + Redis; опционально Adminer; описание аналога в облаке — в `docs/DEPLOY.md`. Файлы: `docker-compose.yml`, `server/pdf-parser/Dockerfile`, `docker.env.example`.
 - [x] **`GET /api/health`** и **`GET /health`** — liveness (`health.controller.ts`, без проверки БД/Redis).
-- [x] **CORS**: allowed origin из env (`CORS_ORIGIN`), несколько origin через запятую; без env — как раньше (любой origin). См. `utils/cors-config.ts`.
-- [x] **Модуль Redis** в приложении — есть (`src/cache/redis.ts`); **`.env.example`** дополнен (`JWT_SECRET`, `JWT_EXPIRES_IN`, комментарии к CORS и т.д. — см. актуальный файл).
+- [x] **CORS**: allowed origin из env (`CORS_ORIGIN`), несколько origin через запятую (по умолчанию `http://localhost:5173,http://localhost:3000`); без env — как раньше (любой origin). См. `utils/cors-config.ts`.
+- [x] **Модуль Redis** в приложении — есть (`src/cache/redis.ts`); **`.env.example`** дополнен (`JWT_SECRET`, `JWT_EXPIRES_IN`, `REDIS_URL`, `PARSE_PIPELINE_CACHE_TTL_SECONDS`, комментарии к CORS и т.д. — см. актуальный файл).
+- [x] **Загрузка env**: `index.ts` подгружает **корневой** `.env` (рядом с `docker-compose.yml`), затем **`server/pdf-parser/.env`** — второй перекрывает первый; это гарантирует подхват `REDIS_URL` и `CORS_ORIGIN` при запуске API на хосте.
 - [x] **Сборка** `server/pdf-parser`: при установленных зависимостях `npm run build` проходит (зависимости `ioredis`, `xlsx` в `package.json`).
 - [ ] **Синхронизация с Dev1**: кто создаёт первую компанию и как заполняется `company_id` до появления API регистрации (сиды / ручной SQL / временный скрипт). *(В коде уже читается `company_id` у сотрудника, если колонка добавлена в БД.)*
 
@@ -104,7 +105,7 @@
 
 - [ ] **Первый деплой staging**: API по **HTTPS**, миграции проходят, smoke: **login** + **создание компании** платформенным админом (`POST /api/admin/companies`). *(В репо нет зафиксированного процесса деплоя.)*
 - [ ] **Секреты только через env**; **CORS** под домен фронта staging.
-- [ ] **`.env.example`** — расширить до полного списка из `DEPLOY.md` (сейчас файл минимальный).
+- [x] **`.env.example`** — расширен: `REDIS_URL`, `PARSE_PIPELINE_CACHE_KEY_PREFIX`, `PARSE_PIPELINE_CACHE_TTL_SECONDS`, `PARSE_RESULT_HASH_TTL_SECONDS`, `CORS_ORIGIN` (несколько origin), комментарии к каждому параметру.
 - [ ] **Runbook миграций** в `DEPLOY.md` финализировать.
 
 **DoD:** стабильный staging URL; команда может повторить деплой по документу; вечерний статус «что на staging» закрыт.
@@ -235,6 +236,7 @@
 
 | Период | Минимум |
 |--------|---------|
+| **День 0 / актуальное** | **Кэш пайплайна парсинга** (`POST /api/parse-file`): ключ `parse:pipeline_{sha256 содержимого файла}`, значение — JSON после OCR/чанки/GigaChat + ValidatorService, TTL **3 суток** (`PARSE_PIPELINE_CACHE_TTL_SECONDS`). При повторной загрузке идентичного файла LLM не вызывается. Дублирование bcrypt-хешей паролей **удалено**. |
 | Неделя 2 (дни 7–8) | Кэш только `GET /documents/:id`, инвалидация на любой write. *(В репо уже есть read-through и `del` при изменениях в `documents`/`approvals` — прогнать регресс и закрыть в DoD.)* |
 | Неделя 3 (день 15) | Проверка отсутствия stale после всех действий. |
 | Неделя 4 (день 17) | Fallback при недоступности Redis. *(Без `REDIS_URL` клиент не создаётся — запросы идут в БД; при **ошибке** соединения с Redis убедиться, что поведение такое же.)* |
@@ -245,4 +247,4 @@
 
 ---
 
-*Аудит беклога против репозитория: апрель 2026; обновление по JWT, bcrypt, компаниям и `requirePlatformAdmin` — актуально к текущему `main`.*
+*Аудит беклога против репозитория: 14 апреля 2026; обновление: удаление дублирования bcrypt в Redis, кэш пайплайна парсинга по SHA-256 файла, CORS multi-origin, dotenv root fallback, расширение `.env.example` — актуально к текущему `main`.*
