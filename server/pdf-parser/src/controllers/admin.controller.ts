@@ -20,6 +20,7 @@ type EmployeeRow = {
   position: string;
   roles_json: string;
   status: "Активен" | "Неактивен";
+  company_id: number | null;
   created_at: Date;
 };
 
@@ -84,7 +85,7 @@ export async function listEmployees(req: Request, res: Response): Promise<void> 
     await ensureEmployeesTable();
 
     const rows = await prisma.$queryRawUnsafe<EmployeeRow[]>(
-      "SELECT id, full_name, email, position, roles_json, status, created_at FROM employees ORDER BY id DESC"
+      "SELECT id, full_name, email, position, roles_json, status, company_id, created_at FROM employees ORDER BY id DESC"
     );
 
     const items = rows.map((row) => {
@@ -101,7 +102,8 @@ export async function listEmployees(req: Request, res: Response): Promise<void> 
         email: row.email,
         position: row.position,
         roles: parsedRoles,
-        status: row.status
+        status: row.status,
+        companyId: row.company_id ?? null
       };
     });
 

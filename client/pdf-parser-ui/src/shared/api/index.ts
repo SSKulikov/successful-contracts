@@ -174,13 +174,24 @@ export type EmployeeRow = {
   position: string;
   roles: string[];
   status: "Активен" | "Неактивен";
+  companyId: number | null;
+};
+
+export type RouteStepRow = {
+  id: number;
+  stepOrder: number;
+  assigneeKind: "employee" | "role_default";
+  assigneeEmployeeId: number | null;
+  roleKey: string | null;
+  defaultEmployeeId: number | null;
 };
 
 export type RouteRow = {
-  key: string;
-  documentType: string;
-  routeName: string;
-  steps: string;
+  id: number;
+  companyId: number;
+  name: string;
+  isDefault: boolean;
+  steps: RouteStepRow[];
 };
 
 /** Зарегистрированные компании (ответ GET /admin/companies). */
@@ -377,7 +388,8 @@ const mockEmployees: EmployeeRow[] = [
     email: "i.petrov@company.ru",
     position: "Финансист",
     roles: ["financier"],
-    status: "Активен"
+    status: "Активен",
+    companyId: 1
   },
   {
     key: "2",
@@ -385,7 +397,8 @@ const mockEmployees: EmployeeRow[] = [
     email: "m.sokolova@company.ru",
     position: "Юрист",
     roles: ["lawyer"],
-    status: "Активен"
+    status: "Активен",
+    companyId: 1
   }
 ];
 
@@ -400,16 +413,23 @@ const mockRegisteredCompanies: RegisteredCompanyRow[] = [
 
 const mockRoutes: RouteRow[] = [
   {
-    key: "1",
-    documentType: "Договор",
-    routeName: "Базовый маршрут договора",
-    steps: "Инициатор -> Юрист -> Финансист -> Главбух"
+    id: 1,
+    companyId: 1,
+    name: "Базовый маршрут договора",
+    isDefault: true,
+    steps: [
+      { id: 1, stepOrder: 1, assigneeKind: "employee", assigneeEmployeeId: 1, roleKey: null, defaultEmployeeId: null },
+      { id: 2, stepOrder: 2, assigneeKind: "role_default", assigneeEmployeeId: null, roleKey: "admin", defaultEmployeeId: 1 }
+    ]
   },
   {
-    key: "2",
-    documentType: "Счет на оплату",
-    routeName: "Маршрут счета",
-    steps: "Инициатор -> Финансист -> Казначей"
+    id: 2,
+    companyId: 1,
+    name: "Маршрут счета",
+    isDefault: false,
+    steps: [
+      { id: 3, stepOrder: 1, assigneeKind: "employee", assigneeEmployeeId: 2, roleKey: null, defaultEmployeeId: null }
+    ]
   }
 ];
 
@@ -583,6 +603,11 @@ export const documentsApi = {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId });
     const response = await httpClient.delete(`/documents/${documentId}`);
     return response.data as { ok: true; id: string };
+  },
+  async listCompanyRoutes(): Promise<RouteRow[]> {
+    if (USE_MOCK_API) return Promise.resolve(mockRoutes);
+    const response = await httpClient.get("/company/approval-routes");
+    return response.data?.items ?? [];
   }
 };
 
@@ -685,14 +710,49 @@ export const adminApi = {
     const response = await httpClient.post("/admin/employees", payload);
     return response.data;
   },
-  async listRoutes(): Promise<RouteRow[]> {
-    if (USE_MOCK_API) return Promise.resolve(mockRoutes);
-    const response = await httpClient.get("/admin/routes");
+  async listRoutes(companyId?: number): Promise<RouteRow[]> {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve(mockRoutes);
+    const params = companyId ? { companyId } : {};
+    const response = await httpClient.get("/admin/routes", { params });
     return response.data?.items ?? [];
   },
-  async createRoute(payload: { documentType: string; routeName: string; steps: string }) {
-    if (USE_MOCK_API) return Promise.resolve({ id: "mock-new-route", ...payload });
+  async createRoute(payload: {
+    companyId: number;
+    name: string;
+    isDefault?: boolean;
+    steps: Array<{
+      stepOrder: number;
+      assigneeKind: "employee" | "role_default";
+      assigneeEmployeeId?: number;
+      roleKey?: string;
+      defaultEmployeeId?: number;
+    }>;
+  }) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ message: "Маршрут создан (mock)" });
     const response = await httpClient.post("/admin/routes", payload);
+    return response.data;
+  },
+  async updateRoute(
+    id: number,
+    payload: {
+      name: string;
+      isDefault?: boolean;
+      steps: Array<{
+        stepOrder: number;
+        assigneeKind: "employee" | "role_default";
+        assigneeEmployeeId?: number;
+        roleKey?: string;
+        defaultEmployeeId?: number;
+      }>;
+    }
+  ) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ message: "Маршрут обновлён (mock)" });
+    const response = await httpClient.put(`/admin/routes/${id}`, payload);
+    return response.data;
+  },
+  async deleteRoute(id: number) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ message: "Маршрут удалён (mock)" });
+    const response = await httpClient.delete(`/admin/routes/${id}`);
     return response.data;
   },
   async listCompanies(): Promise<RegisteredCompanyRow[]> {
