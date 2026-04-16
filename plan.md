@@ -10,9 +10,9 @@
 
 | Задача | Файлы / место |
 |--------|----------------|
-| Таблицы `approval_routes`, `approval_route_steps` (поля шага: `assignee_kind`, ссылки на сотрудника/роль) | `server/pdf-parser/src/services/ApprovalDomainService/index.ts` — расширить `ensureApprovalDomainTables()` и при необходимости отдельные `ALTER` |
-| Колонка `approval_documents.route_id` (NULL до submit), индексы, FK | Там же или Prisma-миграция — один выбранный стиль на весь этап |
-| Зафиксировать контракт имён колонок в комментарии к сервису | `ApprovalDomainService/index.ts` |
+| Таблицы `approval_routes`, `approval_route_steps` (поля шага: `assignee_kind`, ссылки на сотрудника/роль) | `server/pdf-parser/src/services/ApprovalDomainService/index.ts` — расширить `ensureApprovalDomainTables()` и при необходимости отдельные `ALTER` | ГОТОВО
+| Колонка `approval_documents.route_id` (NULL до submit), индексы, FK | Там же или Prisma-миграция — один выбранный стиль на весь этап |ГОТОВО
+| Зафиксировать контракт имён колонок в комментарии к сервису | `ApprovalDomainService/index.ts` |ГОТОВО
 
 **Обоснование:** без персистентных маршрутов нельзя подключать submit/approve на стороне Dev1.
 
@@ -26,10 +26,10 @@
 
 | Задача | Файлы / место |
 |--------|----------------|
-| `GET /api/admin/routes`, `POST /api/admin/routes` (фильтр по `company_id`, валидация шагов) | Новый `server/pdf-parser/src/controllers/approval-routes.controller.ts`, `server/pdf-parser/src/routes.ts` |
-| Эндпоинт списка маршрутов для **админа компании** (не платформенного), например `GET /api/company/approval-routes` | Тот же или отдельный контроллер; цепочка `requireAuth` + проверка роли `admin` и `companyId` |
+| `GET /api/admin/routes`, `POST /api/admin/routes` (фильтр по `company_id`, валидация шагов) | Новый `server/pdf-parser/src/controllers/approval-routes.controller.ts`, `server/pdf-parser/src/routes.ts` |ГОТОВО
+| Эндпоинт списка маршрутов для **админа компании** (не платформенного), например `GET /api/company/approval-routes` | Тот же или отдельный контроллер; цепочка `requireAuth` + проверка роли `admin` и `companyId` |ГОТОВО
 | Обновить `README` / короткий контракт JSON для Dev1 | `server/pdf-parser/README.md` |
-
+ГОТОВО
 **Обоснование:** фронт и Dev1 должны получать список маршрутов без прав платформенного админа; `/admin/routes` остаётся для кросс-компанийного админа.
 
 **DoD:** Postman/curl: list/create для платформенного админа; list для company admin только своей компании.

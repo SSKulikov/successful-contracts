@@ -1,5 +1,25 @@
 import prisma from "../../prisma";
 
+/**
+ * Контракт таблиц домена согласований (ensure-идемпотентная схема).
+ *
+ * approval_routes
+ *   id, company_id, name, is_default (0|1), created_at, updated_at
+ *
+ * approval_route_steps
+ *   id, route_id → approval_routes, step_order (UNIQUE в пределах route),
+ *   assignee_kind: "employee" | "role_default",
+ *   assignee_employee_id (NOT NULL при kind=employee),
+ *   role_key (NOT NULL при kind=role_default, значение из roles_json, напр. "admin"),
+ *   default_employee_id (fallback-исполнитель при kind=role_default)
+ *
+ * approval_documents
+ *   …существующие поля…, route_id → approval_routes (NULL до submit)
+ *
+ * approval_tasks
+ *   …существующие поля…, route_id → approval_routes (FK, ON DELETE SET NULL)
+ */
+
 export type ApprovalDocumentStatus = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
 
 export type ApprovalDocumentAccessRow = {
@@ -8,7 +28,56 @@ export type ApprovalDocumentAccessRow = {
   created_by: number;
   last_edited_by: number;
   status: ApprovalDocumentStatus;
+  route_id: number | null;
 };
+
+export type AssigneeKind = "employee" | "role_default";
+
+export type ApprovalRouteRow = {
+  id: number;
+  company_id: number;
+  name: string;
+  is_default: 0 | 1;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type ApprovalRouteStepRow = {
+  id: number;
+  route_id: number;
+  step_order: number;
+  assignee_kind: AssigneeKind;
+  assignee_employee_id: number | null;
+  role_key: string | null;
+  default_employee_id: number | null;
+};
+
+async function columnExists(table: string, column: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+    `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    table, column
+  );
+  return Number(rows[0]?.cnt ?? 0) > 0;
+}
+
+async function constraintExists(table: string, constraint: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+    `SELECT COUNT(*) AS cnt FROM information_schema.TABLE_CONSTRAINTS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?`,
+    table, constraint
+  );
+  return Number(rows[0]?.cnt ?? 0) > 0;
+}
+
+async function indexExists(table: string, index: string): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+    `SELECT COUNT(*) AS cnt FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+    table, index
+  );
+  return Number(rows[0]?.cnt ?? 0) > 0;
+}
 
 export async function ensureApprovalDomainTables() {
   await prisma.$executeRawUnsafe(`
@@ -72,12 +141,72 @@ export async function ensureApprovalDomainTables() {
       CONSTRAINT fk_approval_tasks_document_id FOREIGN KEY (document_id) REFERENCES approval_documents(id) ON DELETE CASCADE
     )
   `);
+
+  // --- Маршруты согласования ---
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS approval_routes (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      is_default TINYINT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_approval_routes_company_id (company_id)
+    )
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS approval_route_steps (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      route_id INT NOT NULL,
+      step_order INT NOT NULL,
+      assignee_kind VARCHAR(32) NOT NULL,
+      assignee_employee_id INT NULL,
+      role_key VARCHAR(64) NULL,
+      default_employee_id INT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_approval_route_steps_route_id (route_id),
+      UNIQUE INDEX uq_approval_route_steps_route_order (route_id, step_order),
+      CONSTRAINT fk_approval_route_steps_route_id FOREIGN KEY (route_id) REFERENCES approval_routes(id) ON DELETE CASCADE
+    )
+  `);
+
+  // --- Инкрементальные ALTER: колонка route_id в approval_documents + FK ---
+
+  if (!(await columnExists("approval_documents", "route_id"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE approval_documents ADD COLUMN route_id INT NULL AFTER status`
+    );
+  }
+
+  if (!(await indexExists("approval_documents", "idx_approval_documents_route_id"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE approval_documents ADD INDEX idx_approval_documents_route_id (route_id)`
+    );
+  }
+
+  if (!(await constraintExists("approval_documents", "fk_approval_documents_route_id"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE approval_documents ADD CONSTRAINT fk_approval_documents_route_id
+       FOREIGN KEY (route_id) REFERENCES approval_routes(id) ON DELETE SET NULL`
+    );
+  }
+
+  // FK approval_tasks.route_id → approval_routes (колонка уже есть, FK ещё нет)
+
+  if (!(await constraintExists("approval_tasks", "fk_approval_tasks_route_id"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE approval_tasks ADD CONSTRAINT fk_approval_tasks_route_id
+       FOREIGN KEY (route_id) REFERENCES approval_routes(id) ON DELETE SET NULL`
+    );
+  }
 }
 
 export async function getApprovalDocumentAccessRow(documentId: number): Promise<ApprovalDocumentAccessRow | null> {
   const rows = await prisma.$queryRawUnsafe<ApprovalDocumentAccessRow[]>(
     `
-      SELECT id, company_id, created_by, last_edited_by, status
+      SELECT id, company_id, created_by, last_edited_by, status, route_id
       FROM approval_documents
       WHERE id = ?
       LIMIT 1
