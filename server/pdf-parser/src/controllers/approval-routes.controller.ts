@@ -230,6 +230,123 @@ export async function createRouteAdmin(req: Request, res: Response): Promise<voi
   }
 }
 
+export async function updateRouteAdmin(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+
+    const routeId = Number(req.params.id);
+    if (!Number.isInteger(routeId) || routeId <= 0) {
+      res.status(400).json({ message: "Некорректный id маршрута" });
+      return;
+    }
+
+    const existing = await prisma.$queryRawUnsafe<ApprovalRouteRow[]>(
+      `SELECT * FROM approval_routes WHERE id = ? LIMIT 1`,
+      routeId
+    );
+    if (!existing[0]) {
+      res.status(404).json({ message: "Маршрут не найден" });
+      return;
+    }
+
+    const route = existing[0];
+    const body: CreateRouteBody = req.body ?? {};
+    const name = (body.name ?? "").trim();
+    const isDefault = body.isDefault !== undefined ? !!body.isDefault : route.is_default === 1;
+    const steps: StepPayload[] = Array.isArray(body.steps) ? body.steps : [];
+
+    if (!name) {
+      res.status(400).json({ message: "Название маршрута обязательно" });
+      return;
+    }
+
+    const errors: string[] = [];
+    validateSteps(steps, errors);
+    if (errors.length) {
+      res.status(400).json({ message: errors.join("; ") });
+      return;
+    }
+
+    for (const s of steps) {
+      const empId = s.assigneeKind === "employee" ? s.assigneeEmployeeId : s.defaultEmployeeId;
+      if (empId && !(await employeeBelongsToCompany(empId, route.company_id))) {
+        res.status(400).json({
+          message: `Шаг ${s.stepOrder}: сотрудник id=${empId} не принадлежит компании id=${route.company_id}`
+        });
+        return;
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (isDefault) {
+        await tx.$executeRawUnsafe(
+          `UPDATE approval_routes SET is_default = 0 WHERE company_id = ? AND is_default = 1 AND id <> ?`,
+          route.company_id,
+          routeId
+        );
+      }
+
+      await tx.$executeRawUnsafe(
+        `UPDATE approval_routes SET name = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        name,
+        isDefault ? 1 : 0,
+        routeId
+      );
+
+      await tx.$executeRawUnsafe(`DELETE FROM approval_route_steps WHERE route_id = ?`, routeId);
+
+      for (const s of steps) {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO approval_route_steps
+            (route_id, step_order, assignee_kind, assignee_employee_id, role_key, default_employee_id)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          routeId,
+          s.stepOrder,
+          s.assigneeKind,
+          s.assigneeKind === "employee" ? s.assigneeEmployeeId! : null,
+          s.assigneeKind === "role_default" ? s.roleKey! : null,
+          s.assigneeKind === "role_default" ? s.defaultEmployeeId! : null
+        );
+      }
+    });
+
+    logger.info(`✅ Обновлён маршрут id=${routeId}`);
+    res.json({ message: "Маршрут обновлён" });
+  } catch (error) {
+    logger.error(`❌ Ошибка обновления маршрута: ${error}`);
+    res.status(500).json({ message: "Ошибка обновления маршрута" });
+  }
+}
+
+export async function deleteRouteAdmin(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+
+    const routeId = Number(req.params.id);
+    if (!Number.isInteger(routeId) || routeId <= 0) {
+      res.status(400).json({ message: "Некорректный id маршрута" });
+      return;
+    }
+
+    const existing = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM approval_routes WHERE id = ? LIMIT 1`,
+      routeId
+    );
+    if (!existing[0]) {
+      res.status(404).json({ message: "Маршрут не найден" });
+      return;
+    }
+
+    await prisma.$executeRawUnsafe(`DELETE FROM approval_routes WHERE id = ?`, routeId);
+
+    logger.info(`✅ Удалён маршрут id=${routeId}`);
+    res.json({ message: "Маршрут удалён" });
+  } catch (error) {
+    logger.error(`❌ Ошибка удаления маршрута: ${error}`);
+    res.status(500).json({ message: "Ошибка удаления маршрута" });
+  }
+}
+
 // ── Контроллер: админ компании (для UI submit / управления) ────────
 
 export async function listCompanyRoutes(req: Request, res: Response): Promise<void> {

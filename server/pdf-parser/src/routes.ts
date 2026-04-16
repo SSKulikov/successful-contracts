@@ -23,7 +23,7 @@ import {
   withdrawDocument
 } from "./controllers/documents.controller";
 import { approveTask, listMyApprovals, rejectTask, reviseTask } from "./controllers/approvals.controller";
-import { createRouteAdmin, listRoutesAdmin, listCompanyRoutes } from "./controllers/approval-routes.controller";
+import { createRouteAdmin, listRoutesAdmin, updateRouteAdmin, deleteRouteAdmin, listCompanyRoutes } from "./controllers/approval-routes.controller";
 import { getHealth } from "./controllers/health.controller";
 import { requireAuth } from "./middleware/requireAuth";
 import { requirePlatformAdmin } from "./middleware/requirePlatformAdmin";
@@ -42,6 +42,8 @@ router.delete("/admin/companies/:id", requireAuth, requirePlatformAdmin, deleteC
 router.post("/admin/companies/:id/reset-admin", requireAuth, requirePlatformAdmin, resetCompanyAdmin);
 router.get("/admin/routes", requireAuth, requirePlatformAdmin, listRoutesAdmin);
 router.post("/admin/routes", requireAuth, requirePlatformAdmin, createRouteAdmin);
+router.put("/admin/routes/:id", requireAuth, requirePlatformAdmin, updateRouteAdmin);
+router.delete("/admin/routes/:id", requireAuth, requirePlatformAdmin, deleteRouteAdmin);
 router.get("/company/approval-routes", requireAuth, listCompanyRoutes);
 router.post("/auth/login", login);
 router.get("/users/me", requireAuth, getMyProfile);
