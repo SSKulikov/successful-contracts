@@ -51,10 +51,10 @@ export function LandingPage() {
             <SafetyOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            Мои согласования
+            В работе
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
-            Документы, которые пришли на вашу роль: согласовать, отклонить или вернуть на доработку.
+            Задачи по согласованию: согласовать, отклонить или вернуть на доработку с комментарием.
           </Typography.Paragraph>
         </Card>
 

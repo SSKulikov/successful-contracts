@@ -73,10 +73,14 @@ model Employee {
   status              String        @default("Активен") @db.VarChar(32)
   createdAt           DateTime      @default(now()) @map("created_at") @db.DateTime(0)
   companyId           Int?          @map("company_id")
+  deletedAt           DateTime?     @map("deleted_at") @db.DateTime(3)
+  /// Имя файла в uploads/avatars (не полный URL).
+  avatarUrl           String?       @map("avatar_url") @db.VarChar(512)
   company             Company?      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   authSessions        AuthSession[]
 
   @@index([companyId])
+  @@index([deletedAt])
   @@map("employees")
 }
 

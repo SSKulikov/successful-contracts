@@ -135,9 +135,12 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+uploads/
+
 /storage/img/*
 /storage/pdf/*
 /storage/text/*
 /storage/word/*
+/storage/raster/*
 
 .idea/

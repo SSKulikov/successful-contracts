@@ -13,8 +13,22 @@ type RawClient = {
 
 export async function countCompanyAdminsTx(tx: RawClient, companyId: number): Promise<number> {
   const rows = await tx.$queryRawUnsafe<Array<{ c: bigint }>>(
-    `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}`,
+    `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()}`,
     companyId
+  );
+  return Number(rows[0]?.c ?? 0);
+}
+
+/** Админы компании, кроме указанного сотрудника (для PATCH смены ролей / компании). */
+export async function countOtherCompanyAdminsTx(
+  tx: RawClient,
+  companyId: number,
+  excludeEmployeeId: number
+): Promise<number> {
+  const rows = await tx.$queryRawUnsafe<Array<{ c: bigint }>>(
+    `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND deleted_at IS NULL AND id <> ? AND ${companyAdminRoleSqlCondition()}`,
+    companyId,
+    excludeEmployeeId
   );
   return Number(rows[0]?.c ?? 0);
 }

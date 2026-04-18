@@ -1,4 +1,4 @@
-import { Alert, Card, Col, Row, Statistic, Typography } from "antd";
+import { Alert, Card, Col, Row, Statistic } from "antd";
 import type { MyDocumentsByStatusStats } from "../shared/api";
 
 const STATS_ORDER: { key: keyof MyDocumentsByStatusStats["byStatus"]; label: string }[] = [
@@ -18,13 +18,7 @@ type Props = {
 export function MyDocumentsStatusSummary({ stats, loading, isError }: Props) {
   if (isError) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        message="Сводка по статусам недоступна"
-        description="Список документов ниже можно использовать как обычно."
-        style={{ marginBottom: 16 }}
-      />
+      <Alert type="warning" showIcon message="Сводка по статусам недоступна" style={{ marginBottom: 16 }} />
     );
   }
 
@@ -36,18 +30,31 @@ export function MyDocumentsStatusSummary({ stats, loading, isError }: Props) {
 
   const total = STATS_ORDER.reduce((sum, { key }) => sum + stats.byStatus[key], 0);
 
+  const statBlock = (title: string, value: number, valueSize: number) => (
+    <div style={{ textAlign: "center", padding: "12px 8px" }}>
+      <Statistic
+        title={<span style={{ fontSize: 13 }}>{title}</span>}
+        value={value}
+        valueStyle={{
+          fontSize: valueSize,
+          fontWeight: 600,
+          textAlign: "center",
+          display: "block",
+          lineHeight: 1.2
+        }}
+      />
+    </div>
+  );
+
   return (
     <Card size="small" title="Сводка по моим документам" style={{ marginBottom: 16 }}>
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        Учитываются все документы, которые вам видны по правилам доступа (фильтры таблицы ниже на эти цифры не влияют).
-      </Typography.Paragraph>
-      <Row gutter={[12, 12]}>
-        <Col xs={12} sm={8} md={6} lg={4}>
-          <Statistic title="Всего" value={total} valueStyle={{ fontSize: 20, fontWeight: 600 }} />
+      <Row gutter={[16, 16]} justify="center" wrap>
+        <Col xs={12} sm={8} md={6} lg={4} flex="1 1 120px" style={{ maxWidth: 200 }}>
+          {statBlock("Всего", total, 26)}
         </Col>
         {STATS_ORDER.map(({ key, label }) => (
-          <Col key={key} xs={12} sm={8} md={6} lg={4}>
-            <Statistic title={label} value={stats.byStatus[key]} valueStyle={{ fontSize: 18 }} />
+          <Col key={key} xs={12} sm={8} md={6} lg={4} flex="1 1 120px" style={{ maxWidth: 200 }}>
+            {statBlock(label, stats.byStatus[key], 22)}
           </Col>
         ))}
       </Row>

@@ -1,10 +1,23 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Descriptions, Divider, Input, Modal, Space, Steps, Tag, Timeline, Typography, message } from "antd";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
+import {
+  SubmitForApprovalModal,
+  type SubmitForApprovalModalResult
+} from "../shared/components/SubmitForApprovalModal";
 import { getApiErrorMessage } from "../shared/utils/api-error";
-import { DocumentDetails, DocumentHistoryVariant, approvalsApi, documentsApi } from "../shared/api";
+import {
+  approvalsApi,
+  documentsApi,
+  DocumentDetails,
+  DocumentHistoryVariant,
+  getStoredUserProfile,
+  isPlatformAdminUser,
+  type SubmitForApprovalPayload
+} from "../shared/api";
 
 function renderStatusTag(status: DocumentDetails["status"], size: "default" | "large" = "default") {
   const className = size === "large" ? "doc-detail-status doc-detail-status--lg" : "doc-detail-status";
@@ -49,6 +62,10 @@ export function DocumentDetailsPage() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
+
+  const me = getStoredUserProfile();
+  const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
 
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
 
@@ -57,7 +74,6 @@ export function DocumentDetailsPage() {
     queryFn: () => documentsApi.openDocument(id),
     enabled: Boolean(id)
   });
-
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["document-details", id] });
     queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
@@ -97,7 +113,8 @@ export function DocumentDetailsPage() {
     onError: mutationError
   });
   const submitMutation = useMutation({
-    mutationFn: documentsApi.submitForApproval,
+    mutationFn: ({ documentId, ...payload }: { documentId: string } & SubmitForApprovalPayload) =>
+      documentsApi.submitForApproval(documentId, payload),
     onSuccess: () => {
       message.success("Документ отправлен на согласование");
       invalidateAll();
@@ -171,10 +188,29 @@ export function DocumentDetailsPage() {
     });
   };
 
+  const openSubmitRouteModal = () => {
+    if (!id) return;
+    if (isPlatformAdmin && data?.companyId == null) {
+      message.error("У документа не указана компания — отредактируйте карточку или создайте документ заново.");
+      return;
+    }
+    setSubmitRouteModalOpen(true);
+  };
+
+  const handleSubmitForApproval = async (result: SubmitForApprovalModalResult) => {
+    if (!id) return;
+    if (result.kind === "route") {
+      await submitMutation.mutateAsync({ documentId: id, routeId: result.routeId });
+    } else {
+      await submitMutation.mutateAsync({ documentId: id, approverEmployeeIds: result.approverEmployeeIds });
+    }
+    setSubmitRouteModalOpen(false);
+  };
+
   const fields = data?.fields;
 
   return (
-    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/my-documents")}>
           Назад к документам
@@ -188,18 +224,25 @@ export function DocumentDetailsPage() {
 
       <Card className="doc-detail-card" loading={isLoading && !isError}>
         <div className="doc-detail-hero">
-          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             <Space align="start" wrap size={16} style={{ justifyContent: "space-between", width: "100%" }}>
               <div>
                 <Typography.Title level={3} style={{ marginTop: 0, marginBottom: 8 }}>
                   {data?.title ?? "Карточка документа"}
                 </Typography.Title>
-                <Typography.Text type="secondary">Текущий этап согласования</Typography.Text>
-                <div style={{ marginTop: 8 }}>
+                <div style={{ marginTop: 4 }}>
                   <Typography.Text strong className="doc-detail-step-label">
                     {data?.currentStep ?? "—"}
                   </Typography.Text>
                 </div>
+                {data?.approvalChain?.length ? (
+                  <Typography.Paragraph
+                    type="secondary"
+                    style={{ marginTop: 10, marginBottom: 0, whiteSpace: "pre-wrap", fontSize: 13 }}
+                  >
+                    {data.approvalChain.join("\n")}
+                  </Typography.Paragraph>
+                ) : null}
               </div>
               {data ? renderStatusTag(data.status, "large") : null}
             </Space>
@@ -207,11 +250,7 @@ export function DocumentDetailsPage() {
               size="small"
               className="doc-detail-steps"
               current={workflowStepIndex(data?.status)}
-              items={[
-                { title: "Подготовка", description: "Черновик и правки" },
-                { title: "Согласование", description: "Решения по шагам" },
-                { title: "Итог", description: "Согласован или отклонен" }
-              ]}
+              items={[{ title: "Подготовка" }, { title: "Согласование" }, { title: "Итог" }]}
             />
           </Space>
         </div>
@@ -222,8 +261,13 @@ export function DocumentDetailsPage() {
           Действия
         </Typography.Text>
         <Space wrap style={{ marginBottom: 8 }}>
+          {data?.canEditDocumentFields ? (
+            <Button disabled={actionInProgress} onClick={() => navigate("/my-documents")}>
+              Редактировать
+            </Button>
+          ) : null}
           {canSubmit ? (
-            <Button type="primary" disabled={actionInProgress || !id} onClick={() => submitMutation.mutate(id)}>
+            <Button type="primary" disabled={actionInProgress || !id} onClick={() => void openSubmitRouteModal()}>
               Отправить на согласование
             </Button>
           ) : null}
@@ -283,12 +327,7 @@ export function DocumentDetailsPage() {
 
         {!canApproveInCard && !isFinalStatus && !canSubmit && !canResubmit && !canWithdraw && !canDelete ? (
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Действия согласования доступны в разделе «В работе», если вам назначена задача.
-          </Typography.Paragraph>
-        ) : null}
-        {isFinalStatus ? (
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Документ в финальном статусе. Согласование завершено.
+            Решения по согласованию — в разделе «В работе».
           </Typography.Paragraph>
         ) : null}
       </Card>
@@ -325,6 +364,9 @@ export function DocumentDetailsPage() {
         </Divider>
         <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
           <Descriptions.Item label="ID">{data?.id ?? "—"}</Descriptions.Item>
+          {data?.companyId != null ? (
+            <Descriptions.Item label="Компания (ID)">{data.companyId}</Descriptions.Item>
+          ) : null}
           <Descriptions.Item label="Инициатор (контрагент в списке)">{data?.initiator ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Создан">{data?.createdAt ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Обновлен">{data?.updatedAt ?? "—"}</Descriptions.Item>
@@ -357,6 +399,16 @@ export function DocumentDetailsPage() {
           />
         )}
       </Card>
+      <SubmitForApprovalModal
+        open={submitRouteModalOpen}
+        documentId={id || null}
+        documentType={data?.type ?? "—"}
+        companyId={data?.companyId ?? me?.companyId ?? null}
+        isPlatformAdmin={isPlatformAdmin}
+        submitLoading={submitMutation.isPending}
+        onClose={() => setSubmitRouteModalOpen(false)}
+        onSubmit={handleSubmitForApproval}
+      />
     </Space>
   );
 }

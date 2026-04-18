@@ -4,14 +4,25 @@ import prisma from "../prisma";
 import { logger } from "../utils/logger";
 import * as XLSX from "xlsx";
 import type { EmployeeAuthContext } from "../utils/auth-context";
-import { del, getJson, invalidateMyDocumentsListCaches, setJson } from "../cache/redis";
+import { isPlatformAdministrator } from "../utils/auth-context";
+import { del, getJson, invalidateMyDocumentsListCachesAfterMutation, setJson } from "../cache/redis";
 import {
   addApprovalDocumentEvent,
   cancelPendingTasks,
-  createPendingTask,
+  createAdHocApprovalRoute,
+  createTasksFromRoute,
   ensureApprovalDomainTables,
-  getApprovalDocumentAccessRow
+  getApprovalDocumentAccessRow,
+  type ApprovalRouteStepRow
 } from "../services/ApprovalDomainService";
+import {
+  getDocumentTitleLine,
+  getFirstPendingAssigneeId,
+  getPendingAssigneeIds,
+  insertNotification
+} from "../services/NotificationService";
+import { ensureEmployeesTable } from "./admin.controller";
+import { parseApproverEmployeeIds } from "../utils/parse-approver-employee-ids";
 
 type DocumentStatus = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
 
@@ -26,9 +37,17 @@ type CreateDocumentBody = {
   amount?: number | string;
   subject?: string;
   note?: string;
+  /** Для платформенного админа (`companyId` в JWT = null) — компания-владелец документа (обязательно). */
+  companyId?: number | string;
 };
 
 type UpdateDocumentBody = Partial<CreateDocumentBody>;
+type SubmitDocumentBody = {
+  routeId?: number | string;
+  /** Произвольная цепочка согласующих (создаётся одноразовый маршрут). */
+  approverEmployeeIds?: unknown;
+};
+
 type DocumentListFilters = {
   status: string | null;
   type: string | null;
@@ -51,12 +70,18 @@ type DocumentDetailsResponse = {
   initiator: string;
   amount: string;
   currentStep: string;
+  /** Подписи шагов маршрута (если маршрут уже привязан к документу). */
+  approvalChain: string[];
   activeTaskId: string | null;
   canApproveCurrentStep: boolean;
   canWithdrawDocuments: boolean;
   canDeleteDocuments: boolean;
   canSubmitForApproval: boolean;
   canResubmitForApproval: boolean;
+  /** Редактирование полей через PATCH в статусах «Загружен» и «На доработке». */
+  canEditDocumentFields: boolean;
+  /** Компания документа; у платформенного админа нужна для выбора маршрута из админки. */
+  companyId: number | null;
   createdAt: string;
   updatedAt: string;
   history: Array<{ id: string; date: string; action: string; author: string; variant: DocumentHistoryVariant }>;
@@ -72,6 +97,52 @@ type DocumentDetailsResponse = {
   };
 };
 
+const ROLE_STEP_LABEL_FOR_DOC: Record<string, string> = {
+  admin: "Админ компании",
+  lawyer: "Юрист",
+  financier: "Финансист",
+  accountant: "Бухгалтер"
+};
+
+async function buildApprovalChainLabels(companyId: number, routeId: number): Promise<string[]> {
+  const steps = await prisma.$queryRawUnsafe<ApprovalRouteStepRow[]>(
+    `SELECT * FROM approval_route_steps WHERE route_id = ? ORDER BY step_order ASC`,
+    routeId
+  );
+  if (!steps.length) return [];
+
+  const empIds = new Set<number>();
+  for (const s of steps) {
+    if (s.assignee_employee_id) empIds.add(s.assignee_employee_id);
+    if (s.default_employee_id) empIds.add(s.default_employee_id);
+  }
+  const ids = [...empIds];
+  const nameById = new Map<number, string>();
+  if (ids.length) {
+    const iph = ids.map(() => "?").join(",");
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; full_name: string }>>(
+      `SELECT id, full_name FROM employees WHERE company_id = ? AND id IN (${iph}) AND deleted_at IS NULL`,
+      companyId,
+      ...ids
+    );
+    for (const row of rows) {
+      nameById.set(row.id, row.full_name);
+    }
+  }
+  const nameOf = (eid: number | null) => {
+    if (!eid) return "?";
+    return nameById.get(eid) ?? `Сотрудник №${eid}`;
+  };
+
+  return steps.map((s) => {
+    const who =
+      s.assignee_kind === "employee"
+        ? nameOf(s.assignee_employee_id)
+        : `${ROLE_STEP_LABEL_FOR_DOC[s.role_key ?? ""] ?? s.role_key ?? "?"} — ${nameOf(s.default_employee_id)}`;
+    return `${s.step_order}. ${who}`;
+  });
+}
+
 function normalizeString(input: unknown) {
   return String(input ?? "").trim();
 }
@@ -85,6 +156,15 @@ function parseQueryDate(value: string): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString().slice(0, 10);
+}
+
+function isGlobalPlatformAdmin(employee: EmployeeAuthContext): boolean {
+  return employee.role === "admin" && employee.companyId === null;
+}
+
+function canAccessDocumentCompany(employee: EmployeeAuthContext, docCompanyId: number | null): boolean {
+  if (isGlobalPlatformAdmin(employee)) return true;
+  return employee.companyId === docCompanyId;
 }
 
 function parseDocumentListFilters(query: Request["query"]): DocumentListFilters {
@@ -123,8 +203,8 @@ function buildDocumentListWhere(employee: EmployeeAuthContext, filters: Document
   const values: Array<string | number | null> = [];
 
   if (employee.role === "admin") {
-    if (employee.companyId === null) {
-      conditions.push("d.company_id IS NULL");
+    if (isGlobalPlatformAdmin(employee)) {
+      /* платформенный админ — все документы всех компаний */
     } else {
       conditions.push("d.company_id = ?");
       values.push(employee.companyId);
@@ -152,22 +232,12 @@ function buildDocumentListWhere(employee: EmployeeAuthContext, filters: Document
   }
 
   if (filters.dateFrom) {
-    conditions.push(`
-      COALESCE(
-        DATE(STR_TO_DATE(d.date_value, '%Y-%m-%d')),
-        DATE(STR_TO_DATE(d.date_value, '%d.%m.%Y'))
-      ) >= ?
-    `);
+    conditions.push(`DATE(d.created_at) >= ?`);
     values.push(filters.dateFrom);
   }
 
   if (filters.dateTo) {
-    conditions.push(`
-      COALESCE(
-        DATE(STR_TO_DATE(d.date_value, '%Y-%m-%d')),
-        DATE(STR_TO_DATE(d.date_value, '%d.%m.%Y'))
-      ) <= ?
-    `);
+    conditions.push(`DATE(d.created_at) <= ?`);
     values.push(filters.dateTo);
   }
 
@@ -217,7 +287,7 @@ const MY_DOCUMENTS_LIST_CACHE_TTL_SECONDS = 120;
 
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
-  return `doc:${companyPart}:${documentId}`;
+  return `doc:v2:${companyPart}:${documentId}`;
 }
 
 function buildMyDocumentsListCacheKey(employee: EmployeeAuthContext, filters: DocumentListFilters): string {
@@ -234,7 +304,7 @@ function buildMyDocumentsListCacheKey(employee: EmployeeAuthContext, filters: Do
     dateTo: filters.dateTo ?? ""
   };
   const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 32);
-  const companyPart = employee.companyId === null ? "none" : String(employee.companyId);
+  const companyPart = isGlobalPlatformAdmin(employee) ? "all" : employee.companyId === null ? "none" : String(employee.companyId);
   return `my-docs:${companyPart}:${hash}`;
 }
 
@@ -263,13 +333,34 @@ export async function createDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
+    let documentCompanyId: number | null = employee.companyId;
+    if (isGlobalPlatformAdmin(employee)) {
+      const rawCid = body.companyId;
+      const cid = typeof rawCid === "number" ? rawCid : Number(rawCid);
+      if (!Number.isInteger(cid) || cid <= 0) {
+        res.status(400).json({
+          message: "Для платформенного администратора укажите companyId — компанию-владельца документа (из справочника компаний)"
+        });
+        return;
+      }
+      const companyRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+        `SELECT id FROM companies WHERE id = ? LIMIT 1`,
+        cid
+      );
+      if (!companyRows[0]) {
+        res.status(400).json({ message: "Компания с указанным companyId не найдена" });
+        return;
+      }
+      documentCompanyId = cid;
+    }
+
     await prisma.$executeRawUnsafe(
       `
         INSERT INTO approval_documents (
           company_id, type, number_value, date_value, customer_name, customer_inn, executor_name, executor_inn, amount, subject, note, status, created_by, last_edited_by
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      employee.companyId,
+      documentCompanyId,
       type,
       numberValue,
       dateValue,
@@ -301,8 +392,8 @@ export async function createDocument(req: Request, res: Response): Promise<void>
         createdByName: employee.fullName
       }
     });
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(employee.companyId);
+    await del(getDocumentCacheKey(documentCompanyId, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(documentCompanyId);
 
     res.status(201).json({
       id: String(documentId),
@@ -338,6 +429,7 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
     const rows = await prisma.$queryRawUnsafe<
       Array<{
         id: number;
+        company_id: number | null;
         type: string;
         number_value: string;
         date_value: string;
@@ -348,7 +440,7 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
       }>
     >(
       `
-        SELECT d.id, d.type, d.number_value, d.status, d.customer_name, CAST(d.amount AS CHAR) AS amount, d.created_at
+        SELECT d.id, d.company_id, d.type, d.number_value, d.status, d.customer_name, CAST(d.amount AS CHAR) AS amount, d.created_at
         FROM approval_documents d
         ${whereClause}
         ORDER BY d.created_at DESC
@@ -358,6 +450,7 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
 
     const items = rows.map((row) => ({
       id: String(row.id),
+      companyId: row.company_id,
       type: row.type,
       title: `${row.type} №${row.number_value}`,
       status: row.status,
@@ -502,7 +595,7 @@ export async function submitDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (employee.companyId !== document.company_id) {
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
@@ -522,20 +615,61 @@ export async function submitDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
+    const body: SubmitDocumentBody = req.body ?? {};
+    const approverIds = parseApproverEmployeeIds(body.approverEmployeeIds);
+
+    let parsedRouteId: number;
+
+    if (approverIds.length > 0) {
+      if (document.company_id == null) {
+        res.status(400).json({ message: "У документа не указана компания — нельзя построить цепочку согласования" });
+        return;
+      }
+      try {
+        parsedRouteId = await createAdHocApprovalRoute(document.company_id, approverIds);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Ошибка создания цепочки согласования";
+        res.status(400).json({ message: msg });
+        return;
+      }
+    } else {
+      const rid = Number(body.routeId);
+      if (!Number.isInteger(rid) || rid <= 0) {
+        res.status(400).json({ message: "Укажите цепочку согласующих (approverEmployeeIds) или маршрут (routeId)" });
+        return;
+      }
+
+      const routeRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+        `
+          SELECT id
+          FROM approval_routes
+          WHERE id = ?
+            AND company_id <=> ?
+          LIMIT 1
+        `,
+        rid,
+        document.company_id
+      );
+      if (!routeRows[0]) {
+        res.status(400).json({ message: "Маршрут не найден или не принадлежит компании документа" });
+        return;
+      }
+      parsedRouteId = rid;
+    }
+
     await prisma.$executeRawUnsafe(
       `
         UPDATE approval_documents
-        SET status = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, route_id = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
       "in_approval" as DocumentStatus,
+      parsedRouteId,
       documentId
     );
 
     await cancelPendingTasks(documentId);
-
-    // До подключения маршрутов от Dev2 назначаем первую задачу отправителю.
-    await createPendingTask(documentId, employee.id, 1);
+    await createTasksFromRoute(documentId, parsedRouteId);
 
     await addApprovalDocumentEvent({
       documentId,
@@ -545,8 +679,20 @@ export async function submitDocument(req: Request, res: Response): Promise<void>
         submitterId: employee.id
       }
     });
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(document.company_id);
+    const titleLineSubmitted = await getDocumentTitleLine(documentId);
+    const assigneeSubmitted = await getFirstPendingAssigneeId(documentId);
+    if (assigneeSubmitted != null && assigneeSubmitted !== employee.id) {
+      await insertNotification({
+        companyId: document.company_id,
+        recipientEmployeeId: assigneeSubmitted,
+        documentId,
+        eventType: "document_submitted",
+        title: `Новая задача согласования: ${titleLineSubmitted}`,
+        body: "Документ отправлен на согласование"
+      });
+    }
+    await del(getDocumentCacheKey(document.company_id, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "in_approval" });
   } catch (error) {
@@ -573,7 +719,7 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
       return;
     }
 
-    if (employee.companyId !== document.company_id) {
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
@@ -589,21 +735,41 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
       return;
     }
 
+    if (!document.route_id) {
+      res.status(409).json({ message: "Для повторной отправки сначала выберите маршрут согласования" });
+      return;
+    }
+
+    const routeRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `
+        SELECT id
+        FROM approval_routes
+        WHERE id = ?
+          AND company_id <=> ?
+        LIMIT 1
+      `,
+      document.route_id,
+      document.company_id
+    );
+    if (!routeRows[0]) {
+      res.status(409).json({ message: "Маршрут согласования недоступен. Выберите маршрут и отправьте документ заново" });
+      return;
+    }
+
     await cancelPendingTasks(documentId);
 
     await prisma.$executeRawUnsafe(
       `
         UPDATE approval_documents
-        SET status = ?, last_edited_by = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, route_id = ?, last_edited_by = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
       "in_approval" as DocumentStatus,
+      document.route_id,
       employee.id,
       documentId
     );
-
-    // До подключения маршрутов от Dev2 назначаем первый шаг отправителю.
-    await createPendingTask(documentId, employee.id, 1);
+    await createTasksFromRoute(documentId, document.route_id);
 
     await addApprovalDocumentEvent({
       documentId,
@@ -613,8 +779,20 @@ export async function resubmitDocument(req: Request, res: Response): Promise<voi
         resubmitterId: employee.id
       }
     });
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(document.company_id);
+    const titleLineResubmitted = await getDocumentTitleLine(documentId);
+    const assigneeResubmitted = await getFirstPendingAssigneeId(documentId);
+    if (assigneeResubmitted != null && assigneeResubmitted !== employee.id) {
+      await insertNotification({
+        companyId: document.company_id,
+        recipientEmployeeId: assigneeResubmitted,
+        documentId,
+        eventType: "document_resubmitted",
+        title: `Новая задача согласования: ${titleLineResubmitted}`,
+        body: "Документ снова отправлен на согласование"
+      });
+    }
+    await del(getDocumentCacheKey(document.company_id, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "in_approval" });
   } catch (error) {
@@ -641,7 +819,7 @@ export async function withdrawDocument(req: Request, res: Response): Promise<voi
       return;
     }
 
-    if (employee.companyId !== document.company_id) {
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
@@ -656,6 +834,9 @@ export async function withdrawDocument(req: Request, res: Response): Promise<voi
       res.status(409).json({ message: "Отозвать можно только документ в статусе 'На согласовании'" });
       return;
     }
+
+    const titleLineWithdraw = await getDocumentTitleLine(documentId);
+    const assigneeIdsWithdraw = await getPendingAssigneeIds(documentId);
 
     await cancelPendingTasks(documentId);
 
@@ -678,8 +859,20 @@ export async function withdrawDocument(req: Request, res: Response): Promise<voi
         withdrawerId: employee.id
       }
     });
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(document.company_id);
+    for (const uid of assigneeIdsWithdraw) {
+      if (uid !== employee.id) {
+        await insertNotification({
+          companyId: document.company_id,
+          recipientEmployeeId: uid,
+          documentId,
+          eventType: "document_withdrawn",
+          title: `Документ снят с согласования: ${titleLineWithdraw}`,
+          body: "Инициатор отозвал документ с согласования"
+        });
+      }
+    }
+    await del(getDocumentCacheKey(document.company_id, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(document.company_id);
 
     res.json({ ok: true, id: String(documentId), status: "uploaded" });
   } catch (error) {
@@ -706,7 +899,7 @@ export async function deleteDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (employee.companyId !== document.company_id) {
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
@@ -733,8 +926,8 @@ export async function deleteDocument(req: Request, res: Response): Promise<void>
       `,
       documentId
     );
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(document.company_id);
+    await del(getDocumentCacheKey(document.company_id, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(document.company_id);
 
     res.json({ ok: true, id: String(documentId) });
   } catch (error) {
@@ -761,13 +954,15 @@ export async function updateDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (employee.companyId !== document.company_id) {
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
 
     if (document.status !== "revision" && document.status !== "uploaded") {
-      res.status(409).json({ message: "Редактирование доступно только для документов в статусах 'Загружен' или 'На доработке'" });
+      res.status(409).json({
+        message: "Редактирование полей доступно в статусах «Загружен» и «На доработке»"
+      });
       return;
     }
 
@@ -904,8 +1099,8 @@ export async function updateDocument(req: Request, res: Response): Promise<void>
         fields: updates.filter((item) => item !== "last_edited_by = ?" && item !== "updated_at = CURRENT_TIMESTAMP").map((item) => item.split(" = ")[0])
       }
     });
-    await del(getDocumentCacheKey(employee.companyId, documentId));
-    await invalidateMyDocumentsListCaches(document.company_id);
+    await del(getDocumentCacheKey(document.company_id, documentId));
+    await invalidateMyDocumentsListCachesAfterMutation(document.company_id);
 
     res.json({ ok: true, id: String(documentId) });
   } catch (error) {
@@ -975,6 +1170,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       Array<{
         id: number;
         company_id: number | null;
+        route_id: number | null;
         type: string;
         number_value: string;
         date_value: string;
@@ -996,6 +1192,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
         SELECT
           id,
           company_id,
+          route_id,
           type,
           number_value,
           date_value,
@@ -1024,7 +1221,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       return;
     }
 
-    if (employee.companyId !== doc.company_id) {
+    if (!canAccessDocumentCompany(employee, doc.company_id)) {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
@@ -1047,28 +1244,58 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       }
     }
 
-    const cacheKey = getDocumentCacheKey(employee.companyId, documentId);
+    const cacheKey = getDocumentCacheKey(doc.company_id, documentId);
     const cachedPayload = await getJson<DocumentDetailsResponse>(cacheKey);
     if (cachedPayload) {
       res.json(cachedPayload);
       return;
     }
 
-    const currentStepRows = await prisma.$queryRawUnsafe<Array<{ id: number; step_order: number; assignee_user_id: number }>>(
+    const currentStepRows = await prisma.$queryRawUnsafe<
+      Array<{ id: number; step_order: number; assignee_user_id: number; assignee_name: string | null }>
+    >(
       `
-        SELECT id, step_order, assignee_user_id
-        FROM approval_tasks
-        WHERE document_id = ? AND status = 'pending'
-        ORDER BY created_at DESC
+        SELECT t.id, t.step_order, t.assignee_user_id,
+               CASE WHEN e.deleted_at IS NOT NULL THEN NULL ELSE e.full_name END AS assignee_name
+        FROM approval_tasks t
+        LEFT JOIN employees e ON e.id = t.assignee_user_id
+        WHERE t.document_id = ? AND t.status = 'pending'
+        ORDER BY t.step_order ASC, t.id ASC
         LIMIT 1
       `,
       documentId
     );
-    const currentStep = currentStepRows[0]?.step_order ? `Шаг ${currentStepRows[0].step_order}` : "Не назначен";
-    const activeTaskId = currentStepRows[0]?.id ? String(currentStepRows[0].id) : null;
+
+    let totalRouteSteps = 0;
+    if (doc.route_id) {
+      const cntRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+        `SELECT COUNT(*) AS c FROM approval_route_steps WHERE route_id = ?`,
+        doc.route_id
+      );
+      totalRouteSteps = Number(cntRows[0]?.c ?? 0);
+    }
+
+    const pending = currentStepRows[0];
+    let currentStep = "Не назначен";
+    if (pending?.step_order) {
+      const who = pending.assignee_name?.trim() ? pending.assignee_name : "Сотрудник";
+      currentStep =
+        totalRouteSteps > 0
+          ? `Шаг ${pending.step_order} из ${totalRouteSteps}: ${who}`
+          : `Шаг ${pending.step_order}: ${who}`;
+    } else if (doc.status === "in_approval") {
+      currentStep = "Ожидание назначения задачи";
+    }
+
+    const activeTaskId = pending?.id ? String(pending.id) : null;
     const canApproveCurrentStep = Boolean(
-      currentStepRows[0]?.assignee_user_id === employee.id && (employee.role === "admin" || doc.created_by !== employee.id)
+      pending?.assignee_user_id === employee.id && (employee.role === "admin" || doc.created_by !== employee.id)
     );
+
+    let approvalChain: string[] = [];
+    if (doc.company_id != null && doc.route_id) {
+      approvalChain = await buildApprovalChainLabels(doc.company_id, doc.route_id);
+    }
 
     const eventRows = await prisma.$queryRawUnsafe<
       Array<{
@@ -1085,7 +1312,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
           e.event_type,
           e.comment,
           e.created_at,
-          emp.full_name AS actor_name
+          CASE WHEN emp.deleted_at IS NOT NULL THEN NULL ELSE emp.full_name END AS actor_name
         FROM approval_document_events e
         LEFT JOIN employees emp ON emp.id = e.actor_id
         WHERE e.document_id = ?
@@ -1107,6 +1334,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
     const canDeleteDocuments = canEditFlow && doc.status !== "in_approval" && doc.status !== "approved";
     const canSubmitForApproval = canEditFlow && doc.status === "uploaded";
     const canResubmitForApproval = canEditFlow && doc.status === "revision";
+    const canEditDocumentFields = canEditFlow && (doc.status === "uploaded" || doc.status === "revision");
 
     const responsePayload: DocumentDetailsResponse = {
       id: String(doc.id),
@@ -1116,12 +1344,15 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       initiator: doc.customer_name,
       amount: doc.amount,
       currentStep,
+      approvalChain,
       activeTaskId,
       canApproveCurrentStep,
       canWithdrawDocuments,
       canDeleteDocuments,
       canSubmitForApproval,
       canResubmitForApproval,
+      canEditDocumentFields,
+      companyId: doc.company_id,
       createdAt: formatDateTime(doc.created_at),
       updatedAt: formatDateTime(doc.updated_at),
       history,
@@ -1142,6 +1373,52 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
   } catch (error) {
     logger.error(`❌ Ошибка получения карточки документа: ${error}`);
     res.status(500).json({ message: "Ошибка получения карточки документа" });
+  }
+}
+
+/** Сотрудники компании для выбора цепочки согласования (активные, не удалённые). */
+export async function listCompanyEmployees(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureEmployeesTable();
+
+    const employee = req.authContext!;
+    let companyId: number | null = employee.companyId;
+
+    if (isPlatformAdministrator(employee)) {
+      const raw = req.query.companyId;
+      const q = typeof raw === "string" || typeof raw === "number" ? Number(raw) : Number.NaN;
+      if (!Number.isInteger(q) || q <= 0) {
+        res.status(400).json({ message: "Для платформенного администратора укажите query-параметр companyId" });
+        return;
+      }
+      companyId = q;
+    } else if (!companyId) {
+      res.status(403).json({ message: "У вас нет привязки к компании" });
+      return;
+    }
+
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; full_name: string; position: string }>>(
+      `
+        SELECT id, full_name, position
+        FROM employees
+        WHERE company_id = ?
+          AND deleted_at IS NULL
+          AND status = 'Активен'
+        ORDER BY full_name ASC
+      `,
+      companyId
+    );
+
+    res.json({
+      items: rows.map((r) => ({
+        id: r.id,
+        fullName: r.full_name,
+        position: r.position?.trim() ? r.position : "Сотрудник"
+      }))
+    });
+  } catch (error) {
+    logger.error(`❌ Ошибка списка сотрудников компании: ${error}`);
+    res.status(500).json({ message: "Ошибка получения сотрудников" });
   }
 }
 

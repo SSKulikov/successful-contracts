@@ -18,14 +18,35 @@ type CreateRouteBody = {
   companyId?: number;
   name?: string;
   isDefault?: boolean;
+  /** Как у документов: «Договор», «Счет на оплату» и т.д.; пусто — подходит любому типу. */
+  documentType?: string | null;
   steps?: StepPayload[];
 };
+
+const ROUTE_DOCUMENT_TYPES = ["Договор", "УПД", "Счет на оплату", "Акт", "Накладная"] as const;
+
+const ROLE_STEP_LABEL: Record<string, string> = {
+  admin: "Админ компании",
+  lawyer: "Юрист",
+  financier: "Финансист",
+  accountant: "Бухгалтер"
+};
+
+function normalizeRouteDocumentType(raw: unknown): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  if (!(ROUTE_DOCUMENT_TYPES as readonly string[]).includes(v)) {
+    return null;
+  }
+  return v;
+}
 
 type RouteWithSteps = {
   id: number;
   companyId: number;
   name: string;
   isDefault: boolean;
+  documentType: string | null;
   steps: Array<{
     id: number;
     stepOrder: number;
@@ -33,17 +54,28 @@ type RouteWithSteps = {
     assigneeEmployeeId: number | null;
     roleKey: string | null;
     defaultEmployeeId: number | null;
+    assigneeSummary: string;
   }>;
 };
 
 // ── Хелперы ────────────────────────────────────────────────────────
 
-function mapRouteRow(r: ApprovalRouteRow, steps: ApprovalRouteStepRow[]): RouteWithSteps {
+function mapRouteRow(
+  r: ApprovalRouteRow,
+  steps: ApprovalRouteStepRow[],
+  nameMap: Map<string, string>
+): RouteWithSteps {
+  const nameOf = (cid: number, eid: number | null) => {
+    if (!eid) return "?";
+    return nameMap.get(`${cid}:${eid}`) ?? `Сотрудник №${eid}`;
+  };
+
   return {
     id: r.id,
     companyId: r.company_id,
     name: r.name,
     isDefault: r.is_default === 1,
+    documentType: r.document_type ?? null,
     steps: steps
       .filter((s) => s.route_id === r.id)
       .sort((a, b) => a.step_order - b.step_order)
@@ -53,9 +85,40 @@ function mapRouteRow(r: ApprovalRouteRow, steps: ApprovalRouteStepRow[]): RouteW
         assigneeKind: s.assignee_kind,
         assigneeEmployeeId: s.assignee_employee_id,
         roleKey: s.role_key,
-        defaultEmployeeId: s.default_employee_id
+        defaultEmployeeId: s.default_employee_id,
+        assigneeSummary:
+          s.assignee_kind === "employee"
+            ? nameOf(r.company_id, s.assignee_employee_id)
+            : `${ROLE_STEP_LABEL[s.role_key ?? ""] ?? s.role_key ?? "?"} — ${nameOf(r.company_id, s.default_employee_id)}`
       }))
   };
+}
+
+async function buildRouteItemsWithSummaries(routes: ApprovalRouteRow[], steps: ApprovalRouteStepRow[]): Promise<RouteWithSteps[]> {
+  if (!routes.length) return [];
+
+  const companyIds = [...new Set(routes.map((r) => r.company_id))];
+  const empIds = new Set<number>();
+  for (const s of steps) {
+    if (s.assignee_employee_id) empIds.add(s.assignee_employee_id);
+    if (s.default_employee_id) empIds.add(s.default_employee_id);
+  }
+  const ids = [...empIds];
+  const nameMap = new Map<string, string>();
+  if (companyIds.length && ids.length) {
+    const cph = companyIds.map(() => "?").join(",");
+    const iph = ids.map(() => "?").join(",");
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; company_id: number; full_name: string }>>(
+      `SELECT id, company_id, full_name FROM employees WHERE company_id IN (${cph}) AND id IN (${iph}) AND deleted_at IS NULL`,
+      ...companyIds,
+      ...ids
+    );
+    for (const row of rows) {
+      nameMap.set(`${row.company_id}:${row.id}`, row.full_name);
+    }
+  }
+
+  return routes.map((r) => mapRouteRow(r, steps, nameMap));
 }
 
 const VALID_ASSIGNEE_KINDS: AssigneeKind[] = ["employee", "role_default"];
@@ -102,7 +165,7 @@ function validateSteps(steps: StepPayload[], errors: string[]): void {
 
 async function employeeBelongsToCompany(employeeId: number, companyId: number): Promise<boolean> {
   const rows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
-    `SELECT id FROM employees WHERE id = ? AND company_id = ? LIMIT 1`,
+    `SELECT id FROM employees WHERE id = ? AND company_id = ? AND deleted_at IS NULL LIMIT 1`,
     employeeId,
     companyId
   );
@@ -136,7 +199,8 @@ export async function listRoutesAdmin(req: Request, res: Response): Promise<void
       );
     }
 
-    res.json({ items: routes.map((r) => mapRouteRow(r, steps)) });
+    const items = await buildRouteItemsWithSummaries(routes, steps);
+    res.json({ items });
   } catch (error) {
     logger.error(`❌ Ошибка списка маршрутов: ${error}`);
     res.status(500).json({ message: "Ошибка получения маршрутов" });
@@ -152,6 +216,12 @@ export async function createRouteAdmin(req: Request, res: Response): Promise<voi
     const name = (body.name ?? "").trim();
     const isDefault = !!body.isDefault;
     const steps: StepPayload[] = Array.isArray(body.steps) ? body.steps : [];
+    const rawDocType = body.documentType;
+    const docTypeNorm = normalizeRouteDocumentType(rawDocType);
+    if (rawDocType !== undefined && rawDocType !== null && String(rawDocType).trim() !== "" && !docTypeNorm) {
+      res.status(400).json({ message: `documentType должен быть одним из: ${ROUTE_DOCUMENT_TYPES.join(", ")} или пустым` });
+      return;
+    }
 
     if (!companyId) {
       res.status(400).json({ message: "companyId обязателен" });
@@ -197,10 +267,11 @@ export async function createRouteAdmin(req: Request, res: Response): Promise<voi
       }
 
       await tx.$executeRawUnsafe(
-        `INSERT INTO approval_routes (company_id, name, is_default) VALUES (?, ?, ?)`,
+        `INSERT INTO approval_routes (company_id, name, is_default, document_type) VALUES (?, ?, ?, ?)`,
         companyId,
         name,
-        isDefault ? 1 : 0
+        isDefault ? 1 : 0,
+        docTypeNorm
       );
 
       const inserted = await tx.$queryRawUnsafe<Array<{ id: bigint }>>(`SELECT LAST_INSERT_ID() AS id`);
@@ -254,6 +325,16 @@ export async function updateRouteAdmin(req: Request, res: Response): Promise<voi
     const name = (body.name ?? "").trim();
     const isDefault = body.isDefault !== undefined ? !!body.isDefault : route.is_default === 1;
     const steps: StepPayload[] = Array.isArray(body.steps) ? body.steps : [];
+    const rawDocTypeUpd = body.documentType;
+    let nextDocType: string | null = route.document_type ?? null;
+    if (rawDocTypeUpd !== undefined) {
+      const nt = normalizeRouteDocumentType(rawDocTypeUpd);
+      if (String(rawDocTypeUpd ?? "").trim() !== "" && !nt) {
+        res.status(400).json({ message: `documentType должен быть одним из: ${ROUTE_DOCUMENT_TYPES.join(", ")} или пустым` });
+        return;
+      }
+      nextDocType = nt;
+    }
 
     if (!name) {
       res.status(400).json({ message: "Название маршрута обязательно" });
@@ -287,9 +368,10 @@ export async function updateRouteAdmin(req: Request, res: Response): Promise<voi
       }
 
       await tx.$executeRawUnsafe(
-        `UPDATE approval_routes SET name = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        `UPDATE approval_routes SET name = ?, is_default = ?, document_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         name,
         isDefault ? 1 : 0,
+        nextDocType,
         routeId
       );
 
@@ -374,7 +456,8 @@ export async function listCompanyRoutes(req: Request, res: Response): Promise<vo
       );
     }
 
-    res.json({ items: routes.map((r) => mapRouteRow(r, steps)) });
+    const items = await buildRouteItemsWithSummaries(routes, steps);
+    res.json({ items });
   } catch (error) {
     logger.error(`❌ Ошибка списка маршрутов компании: ${error}`);
     res.status(500).json({ message: "Ошибка получения маршрутов" });

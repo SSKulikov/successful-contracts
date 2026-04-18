@@ -180,9 +180,6 @@ export function MyApprovalsPage() {
   return (
     <div>
       <Typography.Title level={3}>В работе</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        Список задач, назначенных вам на согласование.
-      </Typography.Paragraph>
 
       <MockApiBanner />
       {isError ? (
@@ -190,7 +187,7 @@ export function MyApprovalsPage() {
       ) : null}
 
       <Card>
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Space wrap>
             <Input.Search
               placeholder="Поиск по ID, документу или инициатору"
@@ -215,10 +212,6 @@ export function MyApprovalsPage() {
             />
           </Space>
 
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Строка с <Typography.Text strong>синей полосой слева</Typography.Text> — по задаче можно вынести решение (согласовать, на доработку, отклонить). Остальные задачи доступны для просмотра.
-          </Typography.Paragraph>
-
           <Table
             className="my-approvals-table"
             rowKey="id"
@@ -230,7 +223,7 @@ export function MyApprovalsPage() {
             scroll={{ x: 1100 }}
             loading={isLoading || actionInProgress}
             locale={{
-              emptyText: <Empty description="Нет задач на согласование. Когда появятся новые назначения, они отобразятся здесь." />
+              emptyText: <Empty description="Нет задач" />
             }}
             pagination={{
               current: data?.meta.page ?? page,

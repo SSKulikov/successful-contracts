@@ -1,13 +1,67 @@
+import fs from "fs";
+import path from "path";
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import type { EmployeeAccountRow } from "../types/employee-account";
+import { getAvatarsRoot } from "../middleware/uploadAvatar";
+import { resolveAvatarPublicUrl } from "../utils/avatar-public-url";
 import { signAccessToken } from "../utils/jwt";
 import { hashPassword, verifyPasswordOrMigrate } from "../utils/passwords";
 import { ensureAuthSessionsTable } from "./admin.controller";
 import { logger } from "../utils/logger";
 
+/** Имя/ИНН компании: драйверы иногда отдают ключи как `company_name`, иногда как `companyName`. */
+function companyDisplayFields(row: EmployeeAccountRow): { companyName: string | null; companyInn: string | null } {
+  const r = row as unknown as Record<string, unknown>;
+  const nameRaw = r.company_name ?? r.companyName;
+  const innRaw = r.company_inn ?? r.companyInn;
+  const name = nameRaw != null && String(nameRaw).trim() !== "" ? String(nameRaw).trim() : null;
+  const inn = innRaw != null && String(innRaw).trim() !== "" ? String(innRaw).trim() : null;
+  return { companyName: name, companyInn: inn };
+}
+
+const EMPLOYEE_ACCOUNT_BY_ID_SQL = `
+  SELECT
+    e.id,
+    e.full_name,
+    e.email,
+    e.position,
+    e.roles_json,
+    e.password_value,
+    e.is_temporary_password,
+    e.status,
+    e.company_id,
+    e.deleted_at,
+    e.avatar_url,
+    c.name AS company_name,
+    c.inn AS company_inn
+  FROM employees e
+  LEFT JOIN companies c ON c.id = e.company_id
+  WHERE e.id = ? AND e.deleted_at IS NULL
+  LIMIT 1
+`;
+
+/** Актуальная строка сотрудника с названием компании (для профиля, если JOIN в сессии не отдал поля). */
+async function fetchEmployeeAccountById(employeeId: number): Promise<EmployeeAccountRow | null> {
+  const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(EMPLOYEE_ACCOUNT_BY_ID_SQL, employeeId);
+  let row = rows[0];
+  if (!row) return null;
+
+  const { companyName } = companyDisplayFields(row);
+  if (row.company_id && !companyName) {
+    const c = await prisma.$queryRawUnsafe<Array<{ name: string; inn: string | null }>>(
+      `SELECT name, inn FROM companies WHERE id = ? LIMIT 1`,
+      row.company_id
+    );
+    if (c[0]) {
+      row = { ...row, company_name: c[0].name, company_inn: c[0].inn ?? row.company_inn ?? null };
+    }
+  }
+  return row;
+}
+
 /** DTO пользователя для login / GET/PATCH /users/me */
-export function mapEmployeeProfile(row: EmployeeAccountRow) {
+export function mapEmployeeProfile(row: EmployeeAccountRow, req: Request) {
   let roles: string[] = [];
   try {
     roles = JSON.parse(row.roles_json ?? "[]");
@@ -17,15 +71,19 @@ export function mapEmployeeProfile(row: EmployeeAccountRow) {
 
   const isAdmin = roles.includes("admin");
   const roleLabel = isAdmin ? "Администратор" : "Сотрудник";
+  const { companyName, companyInn } = companyDisplayFields(row);
   return {
     fullName: row.full_name,
     email: row.email,
     position: row.position,
     roleLabel,
     companyId: row.company_id,
+    companyName,
+    companyInn,
     role: isAdmin ? ("admin" as const) : ("employee" as const),
     /** Согласовано с `isTemporaryPassword` на login: нужно сменить пароль после одноразового. */
-    mustChangePassword: row.is_temporary_password === 1
+    mustChangePassword: row.is_temporary_password === 1,
+    avatarUrl: resolveAvatarPublicUrl(req, row.avatar_url ?? null)
   };
 }
 
@@ -52,9 +110,23 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
       `
-        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id
-        FROM employees
-        WHERE email = ?
+        SELECT
+          e.id,
+          e.full_name,
+          e.email,
+          e.position,
+          e.roles_json,
+          e.password_value,
+          e.is_temporary_password,
+          e.status,
+          e.company_id,
+          e.deleted_at,
+          e.avatar_url,
+          c.name AS company_name,
+          c.inn AS company_inn
+        FROM employees e
+        LEFT JOIN companies c ON c.id = e.company_id
+        WHERE e.email = ? AND e.deleted_at IS NULL
         LIMIT 1
       `,
       email
@@ -95,7 +167,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     res.json({
       token,
       isTemporaryPassword: employee.is_temporary_password === 1,
-      user: mapEmployeeProfile(employee)
+      user: mapEmployeeProfile(employee, req)
     });
   } catch (error) {
     logger.error(`❌ Ошибка входа сотрудника: ${error}`);
@@ -105,8 +177,13 @@ export async function login(req: Request, res: Response): Promise<void> {
 
 export async function getMyProfile(req: Request, res: Response): Promise<void> {
   try {
-    const employee = req.authEmployee!;
-    res.json(mapEmployeeProfile(employee));
+    const employeeId = req.authEmployee!.id;
+    const row = await fetchEmployeeAccountById(employeeId);
+    if (!row) {
+      res.status(401).json({ message: "Сессия недействительна" });
+      return;
+    }
+    res.json(mapEmployeeProfile(row, req));
   } catch (error) {
     logger.error(`❌ Ошибка получения профиля: ${error}`);
     res.status(500).json({ message: "Ошибка получения профиля" });
@@ -127,22 +204,13 @@ export async function updateMyProfile(req: Request, res: Response): Promise<void
 
     await prisma.$executeRawUnsafe("UPDATE employees SET full_name = ?, email = ? WHERE id = ?", fullName, email, currentEmployee.id);
 
-    const rows = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
-      `
-        SELECT id, full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id
-        FROM employees
-        WHERE id = ?
-        LIMIT 1
-      `,
-      currentEmployee.id
-    );
-    const updated = rows[0];
+    const updated = await fetchEmployeeAccountById(currentEmployee.id);
     if (!updated) {
       res.status(500).json({ message: "Не удалось загрузить профиль после обновления" });
       return;
     }
 
-    res.json(mapEmployeeProfile(updated));
+    res.json(mapEmployeeProfile(updated, req));
   } catch (error) {
     logger.error(`❌ Ошибка обновления профиля: ${error}`);
     res.status(500).json({ message: "Ошибка обновления профиля" });
@@ -182,5 +250,43 @@ export async function changeMyPassword(req: Request, res: Response): Promise<voi
   } catch (error) {
     logger.error(`❌ Ошибка смены пароля: ${error}`);
     res.status(500).json({ message: "Ошибка смены пароля" });
+  }
+}
+
+export async function uploadMyAvatar(req: Request, res: Response): Promise<void> {
+  try {
+    const employee = req.authEmployee!;
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ message: "Добавьте файл в поле формы avatar" });
+      return;
+    }
+
+    const prev = await prisma.$queryRawUnsafe<Array<{ avatar_url: string | null }>>(
+      `SELECT avatar_url FROM employees WHERE id = ? LIMIT 1`,
+      employee.id
+    );
+    const oldName = prev[0]?.avatar_url ?? null;
+
+    await prisma.$executeRawUnsafe(`UPDATE employees SET avatar_url = ? WHERE id = ?`, file.filename, employee.id);
+
+    if (oldName && oldName !== file.filename && !oldName.includes("/") && !oldName.includes("..")) {
+      try {
+        fs.unlinkSync(path.join(getAvatarsRoot(), oldName));
+      } catch {
+        // файл уже отсутствует
+      }
+    }
+
+    const updated = await fetchEmployeeAccountById(employee.id);
+    if (!updated) {
+      res.status(500).json({ message: "Не удалось прочитать профиль" });
+      return;
+    }
+
+    res.json(mapEmployeeProfile(updated, req));
+  } catch (error) {
+    logger.error(`❌ Ошибка загрузки аватара: ${error}`);
+    res.status(500).json({ message: "Ошибка загрузки аватара" });
   }
 }

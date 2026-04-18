@@ -5,6 +5,8 @@ export type DocumentStatus = "Загружен" | "На согласовании
 export type DocumentRow = {
   key: string;
   id: string;
+  /** Компания-владелец (для маршрутов при платформенном админе). */
+  companyId?: number | null;
   type: string;
   title: string;
   initiator: string;
@@ -24,6 +26,8 @@ export type DocumentFormPayload = {
   amount: number;
   subject: string;
   note?: string;
+  /** Только для платформенного админа при создании документа. */
+  companyId?: number;
 };
 
 export type ListMyDocumentsParams = {
@@ -71,12 +75,17 @@ export type DocumentDetails = {
   initiator: string;
   amount: string;
   currentStep: string;
+  /** Цепочка согласующих по привязанному маршруту (подписи шагов). */
+  approvalChain?: string[];
   activeTaskId?: string | null;
   canApproveCurrentStep?: boolean;
   canWithdrawDocuments?: boolean;
   canDeleteDocuments?: boolean;
   canSubmitForApproval?: boolean;
   canResubmitForApproval?: boolean;
+  /** PATCH полей в «Загружен» / «На доработке». */
+  canEditDocumentFields?: boolean;
+  companyId?: number | null;
   createdAt: string;
   updatedAt: string;
   history: DocumentHistoryItem[];
@@ -125,6 +134,21 @@ export type ApprovalListResponse = {
   };
 };
 
+export type NotificationListItem = {
+  id: string;
+  documentId: string | null;
+  eventType: string;
+  title: string;
+  body: string | null;
+  read: boolean;
+  createdAt: string;
+};
+
+export type NotificationsListResponse = {
+  items: NotificationListItem[];
+  meta: { page: number; pageSize: number; total: number };
+};
+
 /** DTO пользователя: login, GET/PATCH /users/me */
 export type UserProfile = {
   fullName: string;
@@ -133,10 +157,16 @@ export type UserProfile = {
   position?: string;
   /** ID компании (tenant); `null` у платформенного админа или без привязки */
   companyId: number | null;
+  /** Название компании (если есть привязка к компании). */
+  companyName?: string | null;
+  /** ИНН компании (для автозаполнения реквизитов заказчика и т.п.). */
+  companyInn?: string | null;
   /** Роль в приложении: администратор компании/платформы или сотрудник */
   role: "admin" | "employee";
   /** Нужно сменить пароль (одноразовый / сброс); то же, что `isTemporaryPassword` в ответе login, дублируется в профиле. */
   mustChangePassword: boolean;
+  /** Абсолютный URL изображения или отсутствует. */
+  avatarUrl?: string | null;
 };
 
 export type AuthUser = UserProfile;
@@ -175,6 +205,8 @@ export type EmployeeRow = {
   roles: string[];
   status: "Активен" | "Неактивен";
   companyId: number | null;
+  /** ISO-строка или null — только при `includeDeleted=1` на бэке для удалённых. */
+  deletedAt?: string | null;
 };
 
 export type RouteStepRow = {
@@ -184,6 +216,8 @@ export type RouteStepRow = {
   assigneeEmployeeId: number | null;
   roleKey: string | null;
   defaultEmployeeId: number | null;
+  /** Человекочитаемое назначение шага (с сервера). */
+  assigneeSummary?: string;
 };
 
 export type RouteRow = {
@@ -191,7 +225,20 @@ export type RouteRow = {
   companyId: number;
   name: string;
   isDefault: boolean;
+  /** Если не задан — маршрут подходит любому типу документа. */
+  documentType?: string | null;
   steps: RouteStepRow[];
+};
+
+export type CompanyEmployeeOption = {
+  id: number;
+  fullName: string;
+  position: string;
+};
+
+export type SubmitForApprovalPayload = {
+  routeId?: number;
+  approverEmployeeIds?: number[];
 };
 
 /** Зарегистрированные компании (ответ GET /admin/companies). */
@@ -214,6 +261,12 @@ export const USER_ROLE_STORAGE_KEY = "docflow-user-role";
 /** Должен совпадать с `PLATFORM_DEMO_ADMIN_EMAIL` на сервере (`admin.controller.ts`). */
 export const PLATFORM_DEMO_ADMIN_EMAIL = "platform-admin@docflow.local";
 
+/** Query-параметр на `/profile` после редиректа из-за `PASSWORD_CHANGE_REQUIRED`. */
+export const PROFILE_PASSWORD_REQUIRED_QUERY = "mustSetPassword";
+
+/** Событие на `window`: пользователь уже на `/profile`, мутация отклонена из-за временного пароля. */
+export const PASSWORD_CHANGE_REQUIRED_CLIENT_EVENT = "docflow-password-change-required";
+
 const httpClient = axios.create({
   baseURL: API_BASE_URL
 });
@@ -225,6 +278,27 @@ httpClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+httpClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = Number(error?.response?.status ?? 0);
+    const code = String(error?.response?.data?.code ?? "");
+    if (status === 403 && code === "PASSWORD_CHANGE_REQUIRED") {
+      if (typeof window !== "undefined") {
+        const path = window.location.pathname.replace(/\/$/, "") || "/";
+        if (path === "/auth") {
+          // страница входа — редирект не нужен
+        } else if (path === "/profile") {
+          window.dispatchEvent(new Event(PASSWORD_CHANGE_REQUIRED_CLIENT_EVENT));
+        } else {
+          window.location.assign(`/profile?${PROFILE_PASSWORD_REQUIRED_QUERY}=1`);
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 const mockDocuments: DocumentRow[] = [
   {
@@ -315,13 +389,15 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
     status: "На согласовании",
     initiator: "Иван Петров",
     amount: "1 250 000 ₽",
-    currentStep: "Финансист",
+    currentStep: "Шаг 2 из 3: Мария Соколова",
+    approvalChain: ["1. Иван Петров", "2. Мария Соколова", "3. Админ компании — Иван Петров"],
     canWithdrawDocuments: true,
     canDeleteDocuments: false,
     canSubmitForApproval: false,
     canResubmitForApproval: false,
     canApproveCurrentStep: true,
     activeTaskId: "1",
+    companyId: 1,
     createdAt: "06.04.2026 11:10",
     updatedAt: "08.04.2026 10:25",
     fields: {
@@ -352,6 +428,8 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
     canDeleteDocuments: true,
     canSubmitForApproval: false,
     canResubmitForApproval: true,
+    canEditDocumentFields: true,
+    companyId: 1,
     createdAt: "05.04.2026 09:30",
     updatedAt: "08.04.2026 09:40",
     fields: {
@@ -377,8 +455,11 @@ const mockProfile: UserProfile = {
   email: "demo@company.ru",
   roleLabel: "Сотрудник",
   companyId: 1,
+  companyName: "ООО Пример",
+  companyInn: "7700000000",
   role: "employee",
-  mustChangePassword: false
+  mustChangePassword: false,
+  avatarUrl: null
 };
 
 const mockEmployees: EmployeeRow[] = [
@@ -402,6 +483,11 @@ const mockEmployees: EmployeeRow[] = [
   }
 ];
 
+const mockCompanyEmployees: CompanyEmployeeOption[] = [
+  { id: 1, fullName: "Иван Петров", position: "Финансист" },
+  { id: 2, fullName: "Мария Соколова", position: "Юрист" }
+];
+
 const mockRegisteredCompanies: RegisteredCompanyRow[] = [
   {
     key: "mock-1",
@@ -417,9 +503,26 @@ const mockRoutes: RouteRow[] = [
     companyId: 1,
     name: "Базовый маршрут договора",
     isDefault: true,
+    documentType: "Договор",
     steps: [
-      { id: 1, stepOrder: 1, assigneeKind: "employee", assigneeEmployeeId: 1, roleKey: null, defaultEmployeeId: null },
-      { id: 2, stepOrder: 2, assigneeKind: "role_default", assigneeEmployeeId: null, roleKey: "admin", defaultEmployeeId: 1 }
+      {
+        id: 1,
+        stepOrder: 1,
+        assigneeKind: "employee",
+        assigneeEmployeeId: 1,
+        roleKey: null,
+        defaultEmployeeId: null,
+        assigneeSummary: "Иван Петров"
+      },
+      {
+        id: 2,
+        stepOrder: 2,
+        assigneeKind: "role_default",
+        assigneeEmployeeId: null,
+        roleKey: "admin",
+        defaultEmployeeId: 1,
+        assigneeSummary: "Админ компании — Иван Петров"
+      }
     ]
   },
   {
@@ -427,8 +530,17 @@ const mockRoutes: RouteRow[] = [
     companyId: 1,
     name: "Маршрут счета",
     isDefault: false,
+    documentType: "Счет на оплату",
     steps: [
-      { id: 3, stepOrder: 1, assigneeKind: "employee", assigneeEmployeeId: 2, roleKey: null, defaultEmployeeId: null }
+      {
+        id: 3,
+        stepOrder: 1,
+        assigneeKind: "employee",
+        assigneeEmployeeId: 2,
+        roleKey: null,
+        defaultEmployeeId: null,
+        assigneeSummary: "Мария Соколова"
+      }
     ]
   }
 ];
@@ -437,9 +549,7 @@ export const contractsApi = {
   async parseFile(file: File) {
     const payload = new FormData();
     payload.append("file", file);
-    const response = await httpClient.post("/parse-file", payload, {
-      headers: { "Content-Type": "multipart/form-data" }
-    });
+    const response = await httpClient.post("/parse-file", payload);
     return response.data;
   },
   async saveDataInfo(data: unknown) {
@@ -477,6 +587,7 @@ export const documentsApi = {
     return items.map((item) => ({
       key: item.id,
       id: item.id,
+      companyId: (item as { companyId?: number | null }).companyId ?? null,
       type: item.type,
       title: item.title,
       initiator: item.initiator ?? item.counterparty ?? "-",
@@ -555,6 +666,7 @@ export const documentsApi = {
           canDeleteDocuments: false,
           canSubmitForApproval: false,
           canResubmitForApproval: false,
+          companyId: 1,
           createdAt: "-",
           updatedAt: "-",
           fields: {
@@ -584,9 +696,9 @@ export const documentsApi = {
     const response = await httpClient.patch(`/documents/${documentId}`, payload);
     return response.data as { ok: true; id: string };
   },
-  async submitForApproval(documentId: string) {
+  async submitForApproval(documentId: string, payload: SubmitForApprovalPayload) {
     if (USE_MOCK_API) return Promise.resolve({ ok: true, id: documentId, status: "in_approval" });
-    const response = await httpClient.post(`/documents/${documentId}/submit`);
+    const response = await httpClient.post(`/documents/${documentId}/submit`, payload);
     return response.data;
   },
   async resubmitForApproval(documentId: string) {
@@ -608,6 +720,13 @@ export const documentsApi = {
     if (USE_MOCK_API) return Promise.resolve(mockRoutes);
     const response = await httpClient.get("/company/approval-routes");
     return response.data?.items ?? [];
+  },
+  async listCompanyEmployees(companyId?: number): Promise<CompanyEmployeeOption[]> {
+    if (USE_MOCK_API) return Promise.resolve(mockCompanyEmployees);
+    const response = await httpClient.get("/company/employees", {
+      params: companyId != null ? { companyId } : {}
+    });
+    return (response.data?.items ?? []) as CompanyEmployeeOption[];
   }
 };
 
@@ -667,6 +786,39 @@ export const approvalsApi = {
   }
 };
 
+export const notificationsApi = {
+  async listNotifications(params?: { page?: number; pageSize?: number }): Promise<NotificationsListResponse> {
+    if (USE_MOCK_API) {
+      return {
+        items: [],
+        meta: { page: 1, pageSize: 20, total: 0 }
+      };
+    }
+    const queryParams: Record<string, number> = {};
+    if (params?.page) queryParams.page = params.page;
+    if (params?.pageSize) queryParams.page_size = params.pageSize;
+    const response = await httpClient.get<NotificationsListResponse>("/notifications", { params: queryParams });
+    return {
+      items: response.data?.items ?? [],
+      meta: {
+        page: Number(response.data?.meta?.page ?? 1),
+        pageSize: Number(response.data?.meta?.pageSize ?? params?.pageSize ?? 20),
+        total: Number(response.data?.meta?.total ?? 0)
+      }
+    };
+  },
+  async getUnreadCount(): Promise<number> {
+    if (USE_MOCK_API) return 0;
+    const response = await httpClient.get<{ count: number }>("/notifications/unread-count");
+    return Number(response.data?.count ?? 0);
+  },
+  async markRead(notificationId: string): Promise<{ ok: boolean; id: string }> {
+    if (USE_MOCK_API) return { ok: true, id: notificationId };
+    const response = await httpClient.post<{ ok: boolean; id: string }>(`/notifications/${notificationId}/read`);
+    return response.data;
+  }
+};
+
 export const profileApi = {
   async getMyProfile(): Promise<UserProfile> {
     if (USE_MOCK_API && USE_MOCK_PROFILE_API) return Promise.resolve(mockProfile);
@@ -676,6 +828,15 @@ export const profileApi = {
   async updateMyProfile(payload: Pick<UserProfile, "fullName" | "email">) {
     if (USE_MOCK_API && USE_MOCK_PROFILE_API) return Promise.resolve({ ...mockProfile, ...payload });
     const response = await httpClient.patch("/users/me", payload);
+    return response.data;
+  },
+  async uploadAvatar(file: File): Promise<UserProfile> {
+    if (USE_MOCK_API && USE_MOCK_PROFILE_API) {
+      return Promise.resolve({ ...mockProfile, avatarUrl: "https://example.com/avatar.png" });
+    }
+    const form = new FormData();
+    form.append("avatar", file);
+    const response = await httpClient.post<UserProfile>("/users/me/avatar", form);
     return response.data;
   },
   async changeMyPassword(payload: { currentPassword: string; newPassword: string }) {
@@ -710,6 +871,38 @@ export const adminApi = {
     const response = await httpClient.post("/admin/employees", payload);
     return response.data;
   },
+  async deleteEmployee(employeeId: string) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve({ ok: true, id: employeeId });
+    const response = await httpClient.delete(`/admin/employees/${employeeId}`);
+    return response.data as { ok: boolean; id: string };
+  },
+  async updateEmployee(
+    employeeId: string,
+    payload: {
+      fullName?: string;
+      email?: string;
+      position?: string;
+      roles?: string[];
+      companyId?: number | null;
+      status?: "Активен" | "Неактивен";
+    }
+  ) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Обновлено (mock)", employee: { key: employeeId, ...payload } });
+    }
+    const response = await httpClient.patch(`/admin/employees/${employeeId}`, payload);
+    return response.data as {
+      message?: string;
+      employee?: EmployeeRow;
+    };
+  },
+  async resetEmployeePassword(employeeId: string) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Сброс (mock)", oneTimePassword: "MOCKPASS12" });
+    }
+    const response = await httpClient.post(`/admin/employees/${employeeId}/reset-password`);
+    return response.data as { message?: string; oneTimePassword?: string };
+  },
   async listRoutes(companyId?: number): Promise<RouteRow[]> {
     if (USE_MOCK_API && USE_MOCK_ADMIN_API) return Promise.resolve(mockRoutes);
     const params = companyId ? { companyId } : {};
@@ -720,6 +913,7 @@ export const adminApi = {
     companyId: number;
     name: string;
     isDefault?: boolean;
+    documentType?: string | null;
     steps: Array<{
       stepOrder: number;
       assigneeKind: "employee" | "role_default";
@@ -737,6 +931,7 @@ export const adminApi = {
     payload: {
       name: string;
       isDefault?: boolean;
+      documentType?: string | null;
       steps: Array<{
         stepOrder: number;
         assigneeKind: "employee" | "role_default";

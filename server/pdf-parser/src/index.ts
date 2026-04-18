@@ -1,12 +1,14 @@
 import fs from "fs";
 import path from "path";
 import express from "express";
+import helmet from "helmet";
 import fileRoutes from "./routes";
 import cors from "cors";
 import { logger } from "./utils/logger";
 import dotenv from "dotenv";
 import { getHealth } from "./controllers/health.controller";
 import { getCorsOptions } from "./utils/cors-config";
+import { ensureAvatarsDir, getAvatarsRoot } from "./middleware/uploadAvatar";
 
 // Сначала `.env` в корне репозитория (рядом с docker-compose), затем `server/pdf-parser/.env` — второй перекрывает первый.
 // Иначе при `npm start` из `server/pdf-parser` переменные из корня не подхватывались, в т.ч. REDIS_URL.
@@ -17,8 +19,22 @@ if (fs.existsSync(envFromPdfParser)) dotenv.config({ path: envFromPdfParser });
 const app = express();
 const PORT = 3003;
 
+if (process.env.TRUST_PROXY === "1") {
+  app.set("trust proxy", 1);
+}
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false
+  })
+);
 app.use(express.json());
 app.use(cors(getCorsOptions()));
+
+ensureAvatarsDir();
+app.use("/api/avatars", express.static(getAvatarsRoot(), { maxAge: "1d" }));
+
 // Тот же обработчик, что GET /api/health — удобно для прокси, которые не префиксуют /api
 app.get("/health", getHealth);
 app.use("/api", fileRoutes); // Подключаем маршруты

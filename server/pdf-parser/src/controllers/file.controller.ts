@@ -11,6 +11,7 @@ import {
 } from "../cache/redis";
 import { PdfService } from "../services/PdfService";
 import { WordService } from "../services/WordService";
+import { recognizeRasterImageToTextFile } from "../services/RasterImageOcr";
 import { RegExService } from "../services/RegExService";
 import { logger } from "../utils/logger";
 import { ValidatorService } from "../services/ValidatorService";
@@ -24,7 +25,9 @@ const parse = new RegExService();
 const gigaChat = new GigaChatService();
 const validator = new ValidatorService();
 
-async function parseFunc(filename: string, fileExtension: string) {
+const RASTER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+async function parseFunc(filename: string, fileExtension: string, rasterSourceAbsolutePath?: string) {
   let parsedData: parsedData = {
     contract_type: null,
     contract_number: null,
@@ -66,10 +69,18 @@ async function parseFunc(filename: string, fileExtension: string) {
       bank_name: null,
     },
   };
-  if (fileExtension === ".pdf") {
+  const extLower = fileExtension.toLowerCase();
+  if (extLower === ".pdf") {
     await pdf.convertPdf(filename);
-  } else {
+  } else if (extLower === ".doc" || extLower === ".docx") {
     await word.convertWord(filename);
+  } else if (RASTER_EXTENSIONS.has(extLower)) {
+    if (!rasterSourceAbsolutePath) {
+      throw new Error("Внутренняя ошибка: не передан путь к изображению");
+    }
+    await recognizeRasterImageToTextFile(filename, rasterSourceAbsolutePath);
+  } else {
+    throw new Error(`Неподдерживаемое расширение для распознавания: ${fileExtension}`);
   }
   const documentArr = parse.parseFullData(filename);
   const requisites = parse.parseRequisites(filename);
@@ -149,15 +160,17 @@ function isPipelineCachedPayload(v: unknown): v is Record<string, unknown> {
 
 // Функция для определения папки хранения в зависимости от типа файла
 const getUploadDir = (mimetype: string) => {
-  if (mimetype === "application/pdf")
-    return path.join(__dirname, "../../storage/pdf");
+  if (mimetype === "application/pdf") return path.join(__dirname, "../../storage/pdf");
   if (
     [
       "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ].includes(mimetype)
   ) {
     return path.join(__dirname, "../../storage/word");
+  }
+  if (["image/jpeg", "image/png", "image/webp"].includes(mimetype)) {
+    return path.join(__dirname, "../../storage/raster");
   }
   return null;
 };
@@ -203,7 +216,7 @@ export const parseFile = (req: Request, res: Response) => {
         parsedJson = cached as Awaited<ReturnType<typeof parseFunc>>;
         pipelineCacheHit = true;
       } else {
-        parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension);
+        parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension, req.file.path);
         await setJson(pipelineCacheKey, parsedJson, getParsePipelineCacheTtlSeconds());
       }
 

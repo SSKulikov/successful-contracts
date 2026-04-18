@@ -50,6 +50,7 @@ services:
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      TRUST_PROXY: ${TRUST_PROXY:-}
     depends_on:
       mysql:
         condition: service_healthy
