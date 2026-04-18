@@ -9,9 +9,11 @@ import {
   adminApi,
   EmployeeRow,
   RouteRow,
+  PLATFORM_DEMO_ADMIN_EMAIL,
   getStoredUserProfile,
   isPlatformAdminUser
 } from "../shared/api";
+import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 
 const ROLE_OPTIONS = [
   { value: "admin", label: "Администратор" },
@@ -34,7 +36,10 @@ export function AdminPanelPage() {
   const [routeEditForm] = Form.useForm();
   const [companyRegisterForm] = Form.useForm();
   const [companyEditForm] = Form.useForm();
+  const [employeeEditForm] = Form.useForm();
   const [companyEditOpen, setCompanyEditOpen] = useState(false);
+  const [employeeEditOpen, setEmployeeEditOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<EmployeeRow | null>(null);
   const [editingCompany, setEditingCompany] = useState<RegisteredCompanyRow | null>(null);
   const [generatedOneTimePassword, setGeneratedOneTimePassword] = useState(generateOneTimePassword);
   const [lastIssuedPassword, setLastIssuedPassword] = useState<string | null>(null);
@@ -95,6 +100,54 @@ export function AdminPanelPage() {
       setGeneratedOneTimePassword(nextPassword);
       employeeForm.setFieldValue("oneTimePassword", nextPassword);
       queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
+    }
+  });
+  const deleteEmployeeMutation = useMutation({
+    mutationFn: adminApi.deleteEmployee,
+    onSuccess: () => {
+      message.success("Сотрудник помечен как удалённый");
+      queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
+          ? (err.response as { data?: { message?: string } }).data?.message
+          : undefined;
+      message.error(msg ?? "Не удалось удалить сотрудника");
+    }
+  });
+  const updateEmployeeMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof adminApi.updateEmployee>[1] }) =>
+      adminApi.updateEmployee(id, payload),
+    onSuccess: () => {
+      message.success("Данные сотрудника сохранены");
+      queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
+      setEmployeeEditOpen(false);
+      setEditingEmployee(null);
+      employeeEditForm.resetFields();
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
+          ? (err.response as { data?: { message?: string } }).data?.message
+          : undefined;
+      message.error(msg ?? "Не удалось сохранить изменения");
+    }
+  });
+  const resetEmployeePasswordMutation = useMutation({
+    mutationFn: adminApi.resetEmployeePassword,
+    onSuccess: (data) => {
+      message.success("Пароль сброшен");
+      if (data?.oneTimePassword) {
+        message.info(`Новый одноразовый пароль: ${data.oneTimePassword}`);
+      }
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
+          ? (err.response as { data?: { message?: string } }).data?.message
+          : undefined;
+      message.error(msg ?? "Не удалось сбросить пароль");
     }
   });
   const createRouteMutation = useMutation({
@@ -224,15 +277,51 @@ export function AdminPanelPage() {
       title: "Действия",
       key: "actions",
       width: 280,
-      render: () => (
+      render: (_, record) => (
         <Space>
-          <Button type="link">Редактировать</Button>
-          <Button type="link" icon={<RedoOutlined />}>
+          <Button
+            type="link"
+            disabled={Boolean(record.deletedAt)}
+            onClick={() => {
+              setEditingEmployee(record);
+              employeeEditForm.setFieldsValue({
+                fullName: record.fullName,
+                email: record.email,
+                position: record.position,
+                companyId: record.companyId ?? undefined,
+                roles: record.roles,
+                status: record.status
+              });
+              setEmployeeEditOpen(true);
+            }}
+          >
+            Редактировать
+          </Button>
+          <Button
+            type="link"
+            icon={<RedoOutlined />}
+            disabled={Boolean(record.deletedAt)}
+            loading={
+              resetEmployeePasswordMutation.isPending &&
+              resetEmployeePasswordMutation.variables === record.key
+            }
+            onClick={() => resetEmployeePasswordMutation.mutate(record.key)}
+          >
             Сбросить пароль
           </Button>
-          <Button type="link" danger>
-            Удалить
-          </Button>
+          <Popconfirm
+            title="Пометить сотрудника как удалённого?"
+            description="Вход будет заблокирован."
+            okText="Удалить"
+            cancelText="Отмена"
+            okButtonProps={{ danger: true }}
+            disabled={record.email === PLATFORM_DEMO_ADMIN_EMAIL || Boolean(record.deletedAt)}
+            onConfirm={() => deleteEmployeeMutation.mutateAsync(record.key)}
+          >
+            <Button type="link" danger loading={deleteEmployeeMutation.isPending} disabled={record.email === PLATFORM_DEMO_ADMIN_EMAIL}>
+              Удалить
+            </Button>
+          </Popconfirm>
         </Space>
       )
     }
@@ -305,6 +394,13 @@ export function AdminPanelPage() {
       render: (v: boolean) => (v ? <Tag color="blue">Да</Tag> : <Tag>Нет</Tag>)
     },
     {
+      title: "Тип документа",
+      dataIndex: "documentType",
+      key: "documentType",
+      width: 140,
+      render: (t: string | null | undefined) => (t ? <Tag>{t}</Tag> : <Typography.Text type="secondary">Любой</Typography.Text>)
+    },
+    {
       title: "Шаги",
       dataIndex: "steps",
       key: "steps",
@@ -336,6 +432,7 @@ export function AdminPanelPage() {
               routeEditForm.setFieldsValue({
                 name: record.name,
                 isDefault: record.isDefault,
+                documentType: record.documentType ?? undefined,
                 steps: record.steps.map((s) => ({
                   assigneeKind: s.assigneeKind,
                   assigneeEmployeeId: s.assigneeEmployeeId ?? undefined,
@@ -383,6 +480,7 @@ export function AdminPanelPage() {
         companyId: Number(values.companyId),
         name: values.name,
         isDefault: !!values.isDefault,
+        documentType: values.documentType ? String(values.documentType) : null,
         steps: (values.steps ?? []).map((s: { assigneeKind: string; assigneeEmployeeId?: number; roleKey?: string; defaultEmployeeId?: number }, i: number) => ({
           stepOrder: i + 1,
           assigneeKind: s.assigneeKind,
@@ -404,6 +502,7 @@ export function AdminPanelPage() {
         payload: {
           name: values.name,
           isDefault: !!values.isDefault,
+          documentType: values.documentType ? String(values.documentType) : null,
           steps: (values.steps ?? []).map((s: { assigneeKind: string; assigneeEmployeeId?: number; roleKey?: string; defaultEmployeeId?: number }, i: number) => ({
             stepOrder: i + 1,
             assigneeKind: s.assigneeKind,
@@ -447,19 +546,52 @@ export function AdminPanelPage() {
     companyEditForm.resetFields();
   };
 
+  const handleEmployeeEditOk = async () => {
+    if (!editingEmployee) return;
+    try {
+      const values = await employeeEditForm.validateFields();
+      const isPlatform = editingEmployee.email === PLATFORM_DEMO_ADMIN_EMAIL;
+      await updateEmployeeMutation.mutateAsync({
+        id: editingEmployee.key,
+        payload: isPlatform
+          ? {
+              fullName: values.fullName,
+              position: values.position,
+              status: values.status,
+              email: editingEmployee.email,
+              roles: editingEmployee.roles,
+              companyId: null
+            }
+          : {
+              fullName: values.fullName,
+              email: values.email,
+              position: values.position,
+              roles: values.roles,
+              companyId:
+                values.companyId != null && values.companyId !== "" ? Number(values.companyId) : null,
+              status: values.status
+            }
+      });
+    } catch {
+      // валидация формы
+    }
+  };
+
+  const handleEmployeeEditCancel = () => {
+    setEmployeeEditOpen(false);
+    setEditingEmployee(null);
+    employeeEditForm.resetFields();
+  };
+
   return (
     <div>
       <Typography.Title level={3}>Админ-панель</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        Управление сотрудниками и маршрутами согласования. Сейчас это UI-скелет для последующего подключения API.
-      </Typography.Paragraph>
-
       <Modal
         title="Редактировать маршрут"
         open={routeEditOpen}
         onOk={handleRouteEditOk}
         onCancel={() => { setRouteEditOpen(false); setEditingRoute(null); routeEditForm.resetFields(); }}
-        destroyOnClose
+        destroyOnHidden
         okText="Сохранить"
         width={720}
         confirmLoading={updateRouteMutation.isPending}
@@ -470,6 +602,14 @@ export function AdminPanelPage() {
           </Form.Item>
           <Form.Item name="isDefault" valuePropName="checked">
             <Checkbox>Маршрут по умолчанию</Checkbox>
+          </Form.Item>
+          <Form.Item
+            label="Тип документа"
+            name="documentType"
+            tooltip="Если не выбран — маршрут доступен для любого типа документа."
+            style={{ maxWidth: 360 }}
+          >
+            <Select allowClear placeholder="Любой тип" options={[...DOCUMENT_TYPE_SELECT_OPTIONS]} />
           </Form.Item>
           <Typography.Text strong style={{ display: "block", margin: "8px 0" }}>Шаги</Typography.Text>
           <Form.List name="steps" rules={[{ validator: async (_, v) => { if (!v || !v.length) throw new Error("Добавьте шаг"); } }]}>
@@ -525,11 +665,91 @@ export function AdminPanelPage() {
       </Modal>
 
       <Modal
+        title="Редактировать сотрудника"
+        open={employeeEditOpen}
+        onOk={handleEmployeeEditOk}
+        onCancel={handleEmployeeEditCancel}
+        destroyOnHidden
+        okText="Сохранить"
+        confirmLoading={updateEmployeeMutation.isPending}
+        width={560}
+      >
+        <Form form={employeeEditForm} layout="vertical">
+          <Form.Item label="ФИО" name="fullName" rules={[{ required: true, message: "Укажите ФИО" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Email"
+            name="email"
+            rules={[
+              { required: true, message: "Укажите email" },
+              { type: "email", message: "Введите корректный email" }
+            ]}
+          >
+            <Input disabled={editingEmployee?.email === PLATFORM_DEMO_ADMIN_EMAIL} />
+          </Form.Item>
+          <Form.Item label="Должность" name="position" rules={[{ required: true, message: "Укажите должность" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Компания"
+            name="companyId"
+            dependencies={["roles"]}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const roles = getFieldValue("roles") as string[] | undefined;
+                  if (editingEmployee?.email === PLATFORM_DEMO_ADMIN_EMAIL) {
+                    return Promise.resolve();
+                  }
+                  if (roles?.includes("admin") && (value === undefined || value === null || value === "")) {
+                    return Promise.reject(new Error("Выберите компанию для администратора"));
+                  }
+                  return Promise.resolve();
+                }
+              })
+            ]}
+          >
+            <Select
+              allowClear
+              placeholder="Без компании (платформа)"
+              disabled={editingEmployee?.email === PLATFORM_DEMO_ADMIN_EMAIL}
+              options={companies.map((c) => ({
+                value: Number(c.key),
+                label: `${c.companyName} (ИНН ${c.inn})`
+              }))}
+            />
+          </Form.Item>
+          <Form.Item label="Роли" name="roles" rules={[{ required: true, message: "Выберите хотя бы одну роль" }]}>
+            <Select
+              mode="multiple"
+              placeholder="Роли"
+              disabled={editingEmployee?.email === PLATFORM_DEMO_ADMIN_EMAIL}
+              options={[
+                { value: "admin", label: "Администратор компании (один на компанию)" },
+                { value: "lawyer", label: "Юрист" },
+                { value: "financier", label: "Финансист" },
+                { value: "accountant", label: "Бухгалтер" }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="Статус" name="status" rules={[{ required: true, message: "Выберите статус" }]}>
+            <Select
+              options={[
+                { value: "Активен", label: "Активен" },
+                { value: "Неактивен", label: "Неактивен" }
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         title="Редактировать компанию"
         open={companyEditOpen}
         onOk={handleCompanyEditOk}
         onCancel={handleCompanyEditCancel}
-        destroyOnClose
+        destroyOnHidden
         okText="Сохранить"
         confirmLoading={updateCompanyMutation.isPending}
       >
@@ -561,7 +781,7 @@ export function AdminPanelPage() {
             key: "employees",
             label: "Сотрудники",
             children: (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Card title="Создать сотрудника">
                   <Form
                     form={employeeForm}
@@ -693,7 +913,7 @@ export function AdminPanelPage() {
             key: "routes",
             label: "Маршруты согласования",
             children: (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Card title="Создать маршрут">
                   <Form form={routeForm} layout="vertical">
                     <Space wrap style={{ width: "100%" }}>
@@ -727,6 +947,15 @@ export function AdminPanelPage() {
                         <Checkbox>Маршрут по умолчанию</Checkbox>
                       </Form.Item>
                     </Space>
+
+                    <Form.Item
+                      label="Тип документа"
+                      name="documentType"
+                      tooltip="Если не выбран — маршрут доступен для любого типа документа."
+                      style={{ maxWidth: 360 }}
+                    >
+                      <Select allowClear placeholder="Любой тип" options={[...DOCUMENT_TYPE_SELECT_OPTIONS]} />
+                    </Form.Item>
 
                     <Typography.Text strong style={{ display: "block", margin: "8px 0" }}>
                       Шаги маршрута
@@ -849,10 +1078,6 @@ export function AdminPanelPage() {
             label: "Регистрация компании",
             children: (
               <Card title="Регистрация компании">
-                <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-                  Зарегистрируйте компанию и получите права администратора для управления сотрудниками и маршрутами
-                  согласования.
-                </Typography.Paragraph>
                 <Form form={companyRegisterForm} layout="vertical" style={{ maxWidth: 520 }}>
                   <Form.Item
                     label="Название компании"

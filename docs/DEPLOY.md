@@ -53,6 +53,10 @@ HTTP API монтируется под префиксом **`/api`** (см. `ser
 | `PUBLIC_APP_URL` | Рекомендуется | Публичный базовый URL веб-приложения **без** завершающего `/`; ссылки в экспорте Excel и т.п. |
 | `JWT_SECRET` | **Да в production** | Подпись access-токенов (HS256). В dev можно не задавать — используется запасной секрет. Старые сессии из `auth_sessions` по-прежнему принимаются |
 | `JWT_EXPIRES_IN` | Опционально | Срок жизни JWT (например `7d`, `24h`). По умолчанию: `7d` |
+| `TRUST_PROXY` | Рекомендуется за reverse proxy | Значение **`1`** включает `trust proxy` в Express (корректный IP для rate limit на `/api/auth/login` и абсолютные URL аватаров по `X-Forwarded-*`) |
+| `AUTH_LOGIN_RATE_WINDOW_MS` | Опционально | Окно rate limit для POST `/api/auth/login` в миллисекундах (по умолчанию 15 минут) |
+| `AUTH_LOGIN_RATE_MAX` | Опционально | Максимум запросов входа с одного IP за окно (по умолчанию **30**) |
+| `AVATAR_MAX_BYTES` | Опционально | Максимальный размер файла для `POST /api/users/me/avatar` (по умолчанию 2 МБ) |
 
 Дополнительно в **`server/pdf-parser/.env.example`**: `OAUTH_TOKEN`, `GIGA_CHAT_ACCESS_KEY` и др. — **legacy / парсер**, смотрите комментарии в файле.
 
@@ -190,10 +194,43 @@ location /api/ {
   proxy_set_header X-Real-IP $remote_addr;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   proxy_set_header X-Forwarded-Proto $scheme;
+  # Загрузка аватара (multipart); при необходимости увеличьте лимит
+  client_max_body_size 5m;
 }
 ```
 
-Порт бэкенда и пути подстроьте под ваш процесс (systemd, Docker, K8s).
+Порт бэкенда и пути подстроьте под ваш процесс (systemd, Docker, K8s). За nginx у процесса Node задайте **`TRUST_PROXY=1`**, чтобы учитывались `X-Forwarded-For` / `X-Forwarded-Proto`.
+
+---
+
+## CI (GitHub Actions)
+
+В репозитории: **`.github/workflows/ci.yml`**. На каждый push/PR в ветках **`main`**, **`master`**, **`front`**:
+
+1. **`server/pdf-parser`**: `npm ci` → `npx prisma generate` → `npm run build` (TypeScript в `dist/`).
+2. **`client/pdf-parser-ui`**: `npm ci` → `npm run build` (включая `tsc -b` и Vite).
+
+База данных в CI **не** поднимается: миграции не выполняются в pipeline, только проверка сборки. Деплой на staging/production по-прежнему: **`npm run migrate:deploy`** на целевой среде перед стартом процесса (как в Docker CMD образа API).
+
+---
+
+## Staging как повторяемый процесс (чеклист)
+
+1. Собрать фронт с **`VITE_API_URL`** на публичный URL API (с суффиксом **`/api`**).
+2. Выкатить статику SPA и процесс Node с одним и тем же набором **секретов из секрет-хранилища** (не из git): `DATABASE_URL`, `JWT_SECRET`, при необходимости `REDIS_URL`, **`CORS_ORIGIN`** = origin фронта, **`PUBLIC_APP_URL`** = публичный URL SPA (для ссылок и абсолютных URL аватаров в JSON).
+3. Выполнить **`prisma migrate deploy`** (или эквивалент из образа) до переключения трафика.
+4. Smoke: **`GET /health`**, логин, открытие списка документов.
+5. При обновлении образа API: тот же порядок (миграции → рестарт). Откат: предыдущий образ + совместимость миграций (при down-миграциях — отдельный runbook).
+
+Публичная саморегистрация компании (**`POST /api/auth/register-company`**) в продукте не зафиксирована — при B2B чаще достаточно **`POST /api/admin/companies`** от платформенного админа.
+
+---
+
+## Аватары (`POST /api/users/me/avatar`)
+
+Файлы сохраняются в каталоге **`uploads/avatars`** относительно рабочей директории процесса Node (в репозитории каталог в **`.gitignore`**). На staging/production при нескольких репликах API либо выносите том на общее хранилище, либо используйте внешнее object storage и доработайте сохранение URL (текущая реализация — локальный диск).
+
+Клиент получает в профиле поле **`avatarUrl`** — абсолютный URL; изображения отдаются с **`GET /api/avatars/<имя_файла>`** (без авторизации, только угадываемое имя файла).
 
 ---
 

@@ -38,6 +38,8 @@ export type ApprovalRouteRow = {
   company_id: number;
   name: string;
   is_default: 0 | 1;
+  /** Тип документа из справочника; NULL — маршрут для любого типа. */
+  document_type?: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -55,8 +57,9 @@ export type ApprovalRouteStepRow = {
 async function columnExists(table: string, column: string): Promise<boolean> {
   const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
     `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-    table, column
+     WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(?) AND LOWER(COLUMN_NAME) = LOWER(?)`,
+    table,
+    column
   );
   return Number(rows[0]?.cnt ?? 0) > 0;
 }
@@ -201,6 +204,19 @@ export async function ensureApprovalDomainTables() {
        FOREIGN KEY (route_id) REFERENCES approval_routes(id) ON DELETE SET NULL`
     );
   }
+
+  if (!(await columnExists("approval_routes", "document_type"))) {
+    try {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE approval_routes ADD COLUMN document_type VARCHAR(64) NULL AFTER is_default`
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!msg.includes("1060") && !msg.includes("Duplicate column name")) {
+        throw error;
+      }
+    }
+  }
 }
 
 export async function getApprovalDocumentAccessRow(documentId: number): Promise<ApprovalDocumentAccessRow | null> {
@@ -222,28 +238,143 @@ export async function cancelPendingTasks(documentId: number) {
     `
       UPDATE approval_tasks
       SET status = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE document_id = ? AND status = ?
+      WHERE document_id = ? AND status IN (?, ?)
     `,
     "cancelled",
     documentId,
-    "pending"
+    "pending",
+    "blocked"
   );
 }
 
-export async function createPendingTask(documentId: number, assigneeUserId: number, stepOrder = 1) {
-  await prisma.$executeRawUnsafe(
+export async function createTasksFromRoute(documentId: number, routeId: number) {
+  const steps = await prisma.$queryRawUnsafe<ApprovalRouteStepRow[]>(
     `
-      INSERT INTO approval_tasks (
-        document_id, route_id, step_order, assignee_user_id, status, decision_comment
-      ) VALUES (?, ?, ?, ?, ?, ?)
+      SELECT id, route_id, step_order, assignee_kind, assignee_employee_id, role_key, default_employee_id
+      FROM approval_route_steps
+      WHERE route_id = ?
+      ORDER BY step_order ASC
+    `,
+    routeId
+  );
+
+  if (!steps.length) {
+    throw new Error("Маршрут не содержит шагов");
+  }
+
+  for (const step of steps) {
+    const assigneeUserId = step.assignee_kind === "employee" ? step.assignee_employee_id : step.default_employee_id;
+    if (!assigneeUserId) {
+      throw new Error(`Шаг ${step.step_order} не содержит исполнителя`);
+    }
+
+    await prisma.$executeRawUnsafe(
+      `
+        INSERT INTO approval_tasks (
+          document_id, route_id, step_order, assignee_user_id, status, decision_comment
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      documentId,
+      routeId,
+      step.step_order,
+      assigneeUserId,
+      step.step_order === 1 ? "pending" : "blocked",
+      null
+    );
+  }
+}
+
+/**
+ * Одноразовый маршрут: только шаги «сотрудник» в заданном порядке (отправка с формы «Мои документы»).
+ */
+export async function createAdHocApprovalRoute(companyId: number, employeeIds: number[]): Promise<number> {
+  if (!employeeIds.length) {
+    throw new Error("Цепочка согласования пуста");
+  }
+
+  const placeholders = employeeIds.map(() => "?").join(",");
+  const validRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+    `
+      SELECT id
+      FROM employees
+      WHERE company_id = ?
+        AND deleted_at IS NULL
+        AND status = 'Активен'
+        AND id IN (${placeholders})
+    `,
+    companyId,
+    ...employeeIds
+  );
+  const valid = new Set(validRows.map((r) => r.id));
+  for (const id of employeeIds) {
+    if (!valid.has(id)) {
+      throw new Error(`Сотрудник id=${id} недоступен для согласования в этой компании`);
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const routeName = `Согласование (${employeeIds.length} шаг.)`;
+    await tx.$executeRawUnsafe(
+      `INSERT INTO approval_routes (company_id, name, is_default, document_type) VALUES (?, ?, 0, NULL)`,
+      companyId,
+      routeName
+    );
+    const idRows = await tx.$queryRawUnsafe<Array<{ id: number }>>(`SELECT LAST_INSERT_ID() AS id`);
+    const routeId = Number(idRows[0]?.id);
+    if (!Number.isInteger(routeId) || routeId <= 0) {
+      throw new Error("Не удалось создать маршрут согласования");
+    }
+
+    let stepOrder = 1;
+    for (const assigneeId of employeeIds) {
+      await tx.$executeRawUnsafe(
+        `
+          INSERT INTO approval_route_steps
+            (route_id, step_order, assignee_kind, assignee_employee_id, role_key, default_employee_id)
+          VALUES (?, ?, 'employee', ?, NULL, NULL)
+        `,
+        routeId,
+        stepOrder,
+        assigneeId
+      );
+      stepOrder += 1;
+    }
+
+    return routeId;
+  });
+}
+
+export async function activateNextRouteTask(documentId: number, currentStepOrder: number): Promise<boolean> {
+  const nextRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+    `
+      SELECT id
+      FROM approval_tasks
+      WHERE document_id = ?
+        AND step_order > ?
+        AND status = 'blocked'
+      ORDER BY step_order ASC
+      LIMIT 1
     `,
     documentId,
-    null,
-    stepOrder,
-    assigneeUserId,
-    "pending",
-    null
+    currentStepOrder
   );
+
+  const nextTaskId = nextRows[0]?.id;
+  if (!nextTaskId) {
+    return false;
+  }
+
+  await prisma.$executeRawUnsafe(
+    `
+      UPDATE approval_tasks
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+    "pending",
+    nextTaskId
+  );
+
+  return true;
 }
 
 export async function addApprovalDocumentEvent(params: {

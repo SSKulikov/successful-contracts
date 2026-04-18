@@ -1,14 +1,20 @@
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import { logger } from "../utils/logger";
-import { addApprovalDocumentEvent, ensureApprovalDomainTables } from "../services/ApprovalDomainService";
-import { del, invalidateMyDocumentsListCaches } from "../cache/redis";
+import {
+  activateNextRouteTask,
+  addApprovalDocumentEvent,
+  cancelPendingTasks,
+  ensureApprovalDomainTables
+} from "../services/ApprovalDomainService";
+import { getDocumentTitleLine, getFirstPendingAssigneeId, insertNotification } from "../services/NotificationService";
+import { del, invalidateMyDocumentsListCachesAfterMutation } from "../cache/redis";
 
 type DecisionAction = "approve" | "reject" | "revise";
 
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
-  return `doc:${companyPart}:${documentId}`;
+  return `doc:v2:${companyPart}:${documentId}`;
 }
 
 function normalizeOptionalQueryString(value: unknown): string | null {
@@ -47,10 +53,14 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
     }
 
     if (search) {
-      whereConditions.push("(d.number_value LIKE ? OR d.customer_name LIKE ? OR d.executor_name LIKE ?)");
-      whereValues.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      whereConditions.push(
+        "(d.number_value LIKE ? OR d.customer_name LIKE ? OR d.executor_name LIKE ? OR COALESCE(initiator.full_name, '') LIKE ? OR COALESCE(initiator.email, '') LIKE ?)"
+      );
+      const p = `%${search}%`;
+      whereValues.push(p, p, p, p, p);
     }
 
+    const joinInitiator = "LEFT JOIN employees initiator ON initiator.id = d.created_by";
     const whereClause = `WHERE ${whereConditions.join(" AND ")}`;
 
     const countRows = await prisma.$queryRawUnsafe<Array<{ total: number }>>(
@@ -58,6 +68,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
         SELECT COUNT(*) AS total
         FROM approval_tasks t
         JOIN approval_documents d ON d.id = t.document_id
+        ${joinInitiator}
         ${whereClause}
       `,
       ...whereValues
@@ -76,6 +87,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
         step_order: number;
         created_by: number;
         waiting_days: bigint;
+        initiator_display: string | null;
       }>
     >(
       `
@@ -89,9 +101,19 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
           t.created_at,
           t.step_order,
           d.created_by,
-          GREATEST(0, DATEDIFF(CURDATE(), DATE(t.created_at))) AS waiting_days
+          GREATEST(0, DATEDIFF(CURDATE(), DATE(t.created_at))) AS waiting_days,
+          CASE
+            WHEN initiator.id IS NULL THEN CONCAT('Сотрудник №', d.created_by)
+            WHEN initiator.deleted_at IS NOT NULL THEN 'Удалённый пользователь'
+            ELSE COALESCE(
+              NULLIF(TRIM(initiator.full_name), ''),
+              NULLIF(TRIM(initiator.email), ''),
+              CONCAT('Сотрудник №', d.created_by)
+            )
+          END AS initiator_display
         FROM approval_tasks t
         JOIN approval_documents d ON d.id = t.document_id
+        ${joinInitiator}
         ${whereClause}
         ORDER BY t.created_at DESC
         LIMIT ?
@@ -107,7 +129,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
       id: String(row.task_id),
       type: row.type,
       title: `${row.type} №${row.number_value}`,
-      initiator: row.customer_name,
+      initiator: row.initiator_display ?? `Сотрудник №${row.created_by}`,
       amount: row.amount,
       waitingDays: Number(row.waiting_days),
       currentStep: `Шаг ${row.step_order}`,
@@ -205,7 +227,6 @@ async function completeTaskDecision(req: Request, res: Response, action: Decisio
   }
 
   const taskNextStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : "revision_requested";
-  const documentNextStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : "revision";
   const eventType = action === "approve" ? "task_approved" : action === "reject" ? "task_rejected" : "task_revise_requested";
 
   await prisma.$executeRawUnsafe(
@@ -218,6 +239,22 @@ async function completeTaskDecision(req: Request, res: Response, action: Decisio
     decisionComment || null,
     taskId
   );
+
+  let documentNextStatus: "in_approval" | "approved" | "rejected" | "revision" = "in_approval";
+  if (action === "approve") {
+    const hasNextStep = await activateNextRouteTask(task.document_id, task.step_order);
+    if (hasNextStep) {
+      documentNextStatus = "in_approval";
+    } else {
+      documentNextStatus = "approved";
+    }
+  } else if (action === "reject") {
+    documentNextStatus = "rejected";
+    await cancelPendingTasks(task.document_id);
+  } else {
+    documentNextStatus = "revision";
+    await cancelPendingTasks(task.document_id);
+  }
 
   await prisma.$executeRawUnsafe(
     `
@@ -240,8 +277,53 @@ async function completeTaskDecision(req: Request, res: Response, action: Decisio
       previousStepOrder: task.step_order
     }
   });
+
+  const titleLine = await getDocumentTitleLine(task.document_id);
+  if (action === "approve") {
+    if (documentNextStatus === "in_approval") {
+      const nextAssignee = await getFirstPendingAssigneeId(task.document_id);
+      if (nextAssignee != null && nextAssignee !== employee.id) {
+        await insertNotification({
+          companyId: task.company_id,
+          recipientEmployeeId: nextAssignee,
+          documentId: task.document_id,
+          eventType: "approval_step_assigned",
+          title: `Согласование: ${titleLine}`,
+          body: "Вам назначен следующий шаг"
+        });
+      }
+    } else if (documentNextStatus === "approved" && task.created_by !== employee.id) {
+      await insertNotification({
+        companyId: task.company_id,
+        recipientEmployeeId: task.created_by,
+        documentId: task.document_id,
+        eventType: "document_approved",
+        title: `Согласовано: ${titleLine}`,
+        body: null
+      });
+    }
+  } else if (action === "reject" && task.created_by !== employee.id) {
+    await insertNotification({
+      companyId: task.company_id,
+      recipientEmployeeId: task.created_by,
+      documentId: task.document_id,
+      eventType: "document_rejected",
+      title: `Отклонено: ${titleLine}`,
+      body: decisionComment || null
+    });
+  } else if (action === "revise" && task.created_by !== employee.id) {
+    await insertNotification({
+      companyId: task.company_id,
+      recipientEmployeeId: task.created_by,
+      documentId: task.document_id,
+      eventType: "document_revision",
+      title: `На доработку: ${titleLine}`,
+      body: decisionComment || null
+    });
+  }
+
   await del(getDocumentCacheKey(task.company_id, task.document_id));
-  await invalidateMyDocumentsListCaches(task.company_id);
+  await invalidateMyDocumentsListCachesAfterMutation(task.company_id);
 
   res.json({
     ok: true,

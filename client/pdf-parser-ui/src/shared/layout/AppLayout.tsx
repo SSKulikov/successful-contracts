@@ -1,6 +1,6 @@
-import { Button, Layout, Menu, Typography } from "antd";
+import { Button, Layout, Menu } from "antd";
 import { useMemo } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   AUTH_TOKEN_STORAGE_KEY,
   AUTH_USER_STORAGE_KEY,
@@ -8,6 +8,7 @@ import {
   getStoredUserProfile,
   isPlatformAdminUser
 } from "../api";
+import { NotificationsBell } from "./NotificationsBell";
 
 const { Header, Content, Sider } = Layout;
 
@@ -24,7 +25,7 @@ export function AppLayout() {
       { key: "/profile", label: "Профиль" },
       { key: "/admin-panel", label: "Админ панель" },
       { key: "/my-documents", label: "Мои документы" },
-      { key: "/my-approvals", label: "Мои согласования" }
+      { key: "/my-approvals", label: "В работе" }
     ],
     []
   );
@@ -53,9 +54,14 @@ export function AppLayout() {
       {showHeader && (
         <Header className="app-header">
           <div className="app-header-inner">
-            <Typography.Title level={4} className="brand">
+            <Link to="/" className="brand-link">
               DocFlow
-            </Typography.Title>
+            </Link>
+            {location.pathname === "/auth" ? (
+              <Link to="/" className="app-header-home-link">
+                На главную
+              </Link>
+            ) : null}
           </div>
         </Header>
       )}
@@ -63,6 +69,16 @@ export function AppLayout() {
         {!hideSidebar && (
           <Sider width={280} className="app-sider">
             <div className="app-sider-inner">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  alignItems: "center",
+                  padding: "8px 12px 4px"
+                }}
+              >
+                <NotificationsBell />
+              </div>
               <Menu
                 mode="inline"
                 className="app-side-menu"

@@ -49,14 +49,14 @@ export async function listCompanies(req: Request, res: Response): Promise<void> 
         (
           SELECT e.full_name
           FROM employees e
-          WHERE e.company_id = c.id AND ${companyAdminRoleSqlCondition("e")}
+          WHERE e.company_id = c.id AND e.deleted_at IS NULL AND ${companyAdminRoleSqlCondition("e")}
           ORDER BY e.id ASC
           LIMIT 1
         ) AS admin_full_name,
         (
           SELECT e.id
           FROM employees e
-          WHERE e.company_id = c.id AND ${companyAdminRoleSqlCondition("e")}
+          WHERE e.company_id = c.id AND e.deleted_at IS NULL AND ${companyAdminRoleSqlCondition("e")}
           ORDER BY e.id ASC
           LIMIT 1
         ) AS admin_employee_id
@@ -112,7 +112,7 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
     }
 
     const dupEmailRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
-      `SELECT COUNT(*) AS c FROM employees WHERE email = ?`,
+      `SELECT COUNT(*) AS c FROM employees WHERE email = ? AND deleted_at IS NULL`,
       email
     );
     if (Number(dupEmailRows[0]?.c ?? 0) > 0) {
@@ -241,7 +241,7 @@ export async function updateCompany(req: Request, res: Response): Promise<void> 
     }
 
     const adminCountRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
-      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}`,
+      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()}`,
       id
     );
     const adminCount = Number(adminCountRows[0]?.c ?? 0);
@@ -265,7 +265,7 @@ export async function updateCompany(req: Request, res: Response): Promise<void> 
       `
       UPDATE employees
       SET full_name = ?
-      WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}
+      WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()}
       LIMIT 1
       `,
       adminFullName,
@@ -335,7 +335,7 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
     const adminRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
       `
       SELECT id FROM employees
-      WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}
+      WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()}
       ORDER BY id ASC
       LIMIT 1
       `,
@@ -347,7 +347,7 @@ export async function resetCompanyAdmin(req: Request, res: Response): Promise<vo
     }
 
     const adminCountRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
-      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND ${companyAdminRoleSqlCondition()}`,
+      `SELECT COUNT(*) AS c FROM employees WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()}`,
       id
     );
     if (Number(adminCountRows[0]?.c ?? 0) > 1) {

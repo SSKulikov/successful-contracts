@@ -6,8 +6,22 @@ import dayjs from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
+import {
+  SubmitForApprovalModal,
+  type SubmitForApprovalModalResult
+} from "../shared/components/SubmitForApprovalModal";
 import { getApiErrorMessage } from "../shared/utils/api-error";
-import { contractsApi, DocumentFormPayload, DocumentRow, documentsApi, type ListMyDocumentsParams } from "../shared/api";
+import {
+  adminApi,
+  contractsApi,
+  DocumentFormPayload,
+  DocumentRow,
+  documentsApi,
+  getStoredUserProfile,
+  isPlatformAdminUser,
+  type ListMyDocumentsParams,
+  type SubmitForApprovalPayload
+} from "../shared/api";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 import { MyDocumentsStatusSummary } from "./MyDocumentsStatusSummary";
 
@@ -33,6 +47,11 @@ export function MyDocumentsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [isParsingFile, setIsParsingFile] = useState(false);
+  const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
+  const [submitDocumentId, setSubmitDocumentId] = useState<string | null>(null);
+
+  const me = getStoredUserProfile();
+  const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -40,6 +59,12 @@ export function MyDocumentsPage() {
     }, 350);
     return () => window.clearTimeout(timeoutId);
   }, [search]);
+
+  const { data: companies = [] } = useQuery({
+    queryKey: ["admin", "companies"],
+    queryFn: adminApi.listCompanies,
+    enabled: isPlatformAdmin
+  });
 
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
 
@@ -80,7 +105,8 @@ export function MyDocumentsPage() {
     onError: mutationError
   });
   const submitMutation = useMutation({
-    mutationFn: documentsApi.submitForApproval,
+    mutationFn: ({ documentId, ...payload }: { documentId: string } & SubmitForApprovalPayload) =>
+      documentsApi.submitForApproval(documentId, payload),
     onSuccess: () => {
       message.success("Документ отправлен на согласование");
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
@@ -110,10 +136,15 @@ export function MyDocumentsPage() {
       const link = document.createElement("a");
       link.href = url;
       link.download = "my-documents.xlsx";
+      link.style.display = "none";
       document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      window.setTimeout(() => {
+        link.click();
+        window.setTimeout(() => {
+          link.remove();
+          window.URL.revokeObjectURL(url);
+        }, 0);
+      }, 0);
       message.success("Экспорт подготовлен");
     },
     onError: mutationError
@@ -137,10 +168,46 @@ export function MyDocumentsPage() {
     onError: mutationError
   });
 
+  const watchedCompanyId = Form.useWatch("companyId", form);
+
+  useEffect(() => {
+    if (!isModalOpen || editingDocumentId) return;
+    if (!isPlatformAdmin) return;
+    if (watchedCompanyId == null) return;
+    const company = companies.find((c) => Number(c.key) === Number(watchedCompanyId));
+    if (company?.inn) {
+      form.setFieldsValue({ customerInn: company.inn });
+    }
+  }, [isModalOpen, editingDocumentId, isPlatformAdmin, watchedCompanyId, companies, form]);
+
   const openCreateModal = () => {
     setEditingDocumentId(null);
     form.resetFields();
+    if (!isPlatformAdmin && me?.companyInn) {
+      form.setFieldsValue({ customerInn: me.companyInn });
+    }
     setIsModalOpen(true);
+  };
+
+  const openSubmitRouteModal = (documentId: string) => {
+    const row = data.find((r) => r.id === documentId);
+    if (isPlatformAdmin && row?.companyId == null) {
+      message.error("У документа не указана компания. Создайте документ заново и выберите компанию в форме.");
+      return;
+    }
+    setSubmitDocumentId(documentId);
+    setSubmitRouteModalOpen(true);
+  };
+
+  const handleSubmitForApproval = async (result: SubmitForApprovalModalResult) => {
+    if (!submitDocumentId) return;
+    if (result.kind === "route") {
+      await submitMutation.mutateAsync({ documentId: submitDocumentId, routeId: result.routeId });
+    } else {
+      await submitMutation.mutateAsync({ documentId: submitDocumentId, approverEmployeeIds: result.approverEmployeeIds });
+    }
+    setSubmitRouteModalOpen(false);
+    setSubmitDocumentId(null);
   };
 
   const resetFilters = () => {
@@ -164,14 +231,18 @@ export function MyDocumentsPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const allowedTypes = [
+    const allowedTypes = new Set([
       "application/pdf",
       "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      message.error("Можно загружать только PDF или Word-документы (.pdf, .doc, .docx)");
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ]);
+    const okByMime = allowedTypes.has(file.type);
+    const okByExt = /\.(pdf|doc|docx|jpe?g|png|webp)$/i.test(file.name);
+    if (!okByMime && !okByExt) {
+      message.error("Допустимы PDF, Word (.doc, .docx) и изображения JPG, PNG, WebP");
       event.target.value = "";
       return;
     }
@@ -207,6 +278,7 @@ export function MyDocumentsPage() {
       const details = await documentsApi.openDocument(row.id);
       setEditingDocumentId(row.id);
       form.setFieldsValue({
+        companyId: details.companyId ?? undefined,
         type: details.type,
         number: details.fields?.number ?? "",
         date: details.fields?.date ?? "",
@@ -226,7 +298,12 @@ export function MyDocumentsPage() {
 
   const handleModalOk = async () => {
     const values = await form.validateFields();
-    await saveDocumentMutation.mutateAsync(values);
+    if (editingDocumentId) {
+      const { companyId: _omitCompany, ...rest } = values;
+      await saveDocumentMutation.mutateAsync(rest);
+    } else {
+      await saveDocumentMutation.mutateAsync(values);
+    }
   };
 
   const sortByText = (a: string | undefined, b: string | undefined) => String(a ?? "").localeCompare(String(b ?? ""), "ru");
@@ -276,22 +353,26 @@ export function MyDocumentsPage() {
           </Button>
           {row.status === "Загружен" || row.status === "На доработке" ? (
             <>
-              <Button type="link" onClick={() => openEditModal(row)}>
+              <Button type="link" onClick={() => void openEditModal(row)}>
                 Редактировать
               </Button>
               {row.status === "На доработке" ? (
-                <Button type="link" loading={resubmitMutation.isPending} onClick={() => resubmitMutation.mutate(row.id)}>
+                <Button
+                  type="link"
+                  loading={resubmitMutation.isPending && resubmitMutation.variables === row.id}
+                  onClick={() => resubmitMutation.mutate(row.id)}
+                >
                   Повторно отправить
                 </Button>
               ) : (
-                <Button type="link" loading={submitMutation.isPending} onClick={() => submitMutation.mutate(row.id)}>
+                <Button type="link" loading={submitMutation.isPending} onClick={() => void openSubmitRouteModal(row.id)}>
                   Отправить
                 </Button>
               )}
               <Button
                 type="link"
                 danger
-                loading={deleteMutation.isPending}
+                loading={deleteMutation.isPending && deleteMutation.variables === row.id}
                 onClick={() =>
                   Modal.confirm({
                     title: "Удалить документ?",
@@ -310,7 +391,7 @@ export function MyDocumentsPage() {
           {row.status === "На согласовании" ? (
             <Button
               type="link"
-              loading={withdrawMutation.isPending}
+              loading={withdrawMutation.isPending && withdrawMutation.variables === row.id}
               onClick={() =>
                 Modal.confirm({
                   title: "Отозвать документ с согласования?",
@@ -332,9 +413,6 @@ export function MyDocumentsPage() {
   return (
     <div>
       <Typography.Title level={3}>Мои документы</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        Реестр документов с серверной фильтрацией и поиском.
-      </Typography.Paragraph>
 
       <MyDocumentsStatusSummary stats={statusStats} loading={statusStatsLoading} isError={statusStatsError} />
 
@@ -342,7 +420,7 @@ export function MyDocumentsPage() {
       {isError ? <Alert type="error" showIcon message="Не удалось загрузить список" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} /> : null}
 
       <Card>
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Space wrap>
             <Input.Search
               placeholder="Поиск по номеру, контрагенту или ИНН"
@@ -374,13 +452,13 @@ export function MyDocumentsPage() {
               options={DOCUMENT_TYPE_SELECT_OPTIONS}
             />
             <DatePicker
-              placeholder="Дата с"
+              placeholder="Создан с"
               format="YYYY-MM-DD"
               value={dateFrom ? dayjs(dateFrom) : undefined}
               onChange={(value) => setDateFrom(value ? value.format("YYYY-MM-DD") : undefined)}
             />
             <DatePicker
-              placeholder="Дата по"
+              placeholder="Создан по"
               format="YYYY-MM-DD"
               value={dateTo ? dayjs(dateTo) : undefined}
               onChange={(value) => setDateTo(value ? value.format("YYYY-MM-DD") : undefined)}
@@ -389,8 +467,8 @@ export function MyDocumentsPage() {
             <Tooltip
               title={
                 data.length === 0 && !isLoading && !isError
-                  ? "Нет строк для выгрузки при текущих фильтрах. Сбросьте фильтры или измените поиск."
-                  : "В файл попадут те же документы, что и строки таблицы ниже (поиск, статус, тип, даты). Сортировка по колонкам меняет только порядок на экране."
+                  ? "Нет строк для выгрузки"
+                  : "В файл — текущий список в таблице; сортировка колонок только на экране"
               }
             >
               <Button
@@ -434,12 +512,12 @@ export function MyDocumentsPage() {
                 ) : null}
                 {dateFrom ? (
                   <Tag closable onClose={() => setDateFrom(undefined)}>
-                    Дата документа с: {dateFrom}
+                    Дата создания с: {dateFrom}
                   </Tag>
                 ) : null}
                 {dateTo ? (
                   <Tag closable onClose={() => setDateTo(undefined)}>
-                    Дата документа по: {dateTo}
+                    Дата создания по: {dateTo}
                   </Tag>
                 ) : null}
                 <Button type="link" size="small" onClick={resetFilters} style={{ paddingInline: 4 }}>
@@ -449,10 +527,6 @@ export function MyDocumentsPage() {
             </div>
           ) : null}
 
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Экспорт в Excel использует те же условия, что и список в таблице (поиск, статус, тип, даты документа). Сортировка по заголовкам колонок влияет только на отображение, не на состав файла.
-          </Typography.Paragraph>
-
           <Table
             rowKey="id"
             columns={columns}
@@ -461,7 +535,7 @@ export function MyDocumentsPage() {
             pagination={{ pageSize: 8 }}
             locale={{
               emptyText: (
-                <Empty description="Нет документов по выбранным условиям">
+                <Empty description="Нет документов">
                   <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
                     Создать документ
                   </Button>
@@ -471,6 +545,19 @@ export function MyDocumentsPage() {
           />
         </Space>
       </Card>
+      <SubmitForApprovalModal
+        open={submitRouteModalOpen}
+        documentId={submitDocumentId}
+        documentType={data.find((r) => r.id === submitDocumentId)?.type ?? "—"}
+        companyId={data.find((r) => r.id === submitDocumentId)?.companyId ?? me?.companyId ?? null}
+        isPlatformAdmin={isPlatformAdmin}
+        submitLoading={submitMutation.isPending}
+        onClose={() => {
+          setSubmitRouteModalOpen(false);
+          setSubmitDocumentId(null);
+        }}
+        onSubmit={handleSubmitForApproval}
+      />
       <Modal
         title={editingDocumentId ? "Редактировать документ" : "Создать документ"}
         open={isModalOpen}
@@ -488,10 +575,29 @@ export function MyDocumentsPage() {
             type="file"
             style={{ display: "none" }}
             onChange={handleFileChange}
-            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
           />
         </Space>
         <Form form={form} layout="vertical">
+          {isPlatformAdmin ? (
+            <Form.Item
+              name="companyId"
+              label="Компания (владелец документа)"
+              rules={[{ required: true, message: "Выберите компанию" }]}
+              extra="Маршруты согласования настраиваются в админ-панели для этой компании. После создания документа компанию сменить нельзя."
+            >
+              <Select
+                placeholder="Выберите компанию"
+                disabled={Boolean(editingDocumentId)}
+                options={companies.map((c) => ({
+                  value: Number(c.key),
+                  label: `${c.companyName} (ИНН ${c.inn})`
+                }))}
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
+          ) : null}
           <Form.Item name="type" label="Тип документа" rules={[{ required: true, message: "Укажите тип документа" }]}>
             <Select options={DOCUMENT_TYPE_SELECT_OPTIONS} placeholder="Выберите тип" />
           </Form.Item>

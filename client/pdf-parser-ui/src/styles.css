@@ -10,11 +10,30 @@ body {
   background: #f5f7fb;
 }
 
-.brand {
-  color: #111827 !important;
-  font-size: 22px !important;
+.brand-link {
+  color: #111827;
+  font-size: 22px;
   font-weight: 700;
-  margin: 0 !important;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.2;
+  min-height: 0;
+}
+
+.brand-link:hover {
+  color: #334155;
+}
+
+.app-header-home-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: #64748b;
+  text-decoration: none;
+}
+
+.app-header-home-link:hover {
+  color: #334155;
 }
 
 .app-header {
@@ -22,7 +41,9 @@ body {
   border-bottom: 1px solid #eef0f5;
   padding: 0 24px;
   height: 72px;
-  line-height: 72px;
+  line-height: normal;
+  display: flex;
+  align-items: center;
 }
 
 .app-header-inner {
@@ -33,6 +54,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 0;
 }
 
 .app-header-actions {
@@ -46,6 +68,21 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+}
+
+.auth-page {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 32px 16px 48px;
+}
+
+.auth-card.ant-card {
+  width: 100%;
+  max-width: 420px;
+  flex-shrink: 0;
 }
 
 .app-content-with-sider {
@@ -259,13 +296,16 @@ body {
 @media (max-width: 960px) {
   .app-header {
     height: auto;
+    min-height: 56px;
     line-height: normal;
-    padding: 10px 14px;
+    padding: 12px 14px;
   }
 
   .app-header-inner {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 8px;
   }
 
   .landing-title.ant-typography {
@@ -383,16 +423,16 @@ body {
 
 /* «В работе»: акцент на задачах, где можно вынести решение */
 .my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable > td {
-  background: rgba(22, 119, 255, 0.06);
+  background: rgba(51, 65, 85, 0.07);
   border-bottom-color: #e8ecf4;
 }
 
 .my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable {
-  box-shadow: inset 3px 0 0 #1677ff;
+  box-shadow: inset 3px 0 0 #334155;
 }
 
 .my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable:hover > td {
-  background: rgba(22, 119, 255, 0.1) !important;
+  background: rgba(51, 65, 85, 0.11) !important;
 }
 
 .my-approvals-table .ant-table-tbody > tr.my-approvals-row--view-only > td {

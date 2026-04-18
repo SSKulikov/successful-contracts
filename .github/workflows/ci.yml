@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, front]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/pdf-parser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/pdf-parser/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate --schema=src/prisma/schema.prisma
+      - run: npm run build
+
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/pdf-parser-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/pdf-parser-ui/package-lock.json
+      - run: npm ci
+      - run: npm run build

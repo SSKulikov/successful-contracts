@@ -7,6 +7,7 @@ import {
   PLATFORM_DEMO_ADMIN_EMAIL,
   USER_ROLE_STORAGE_KEY
 } from "../shared/api";
+import { getApiErrorMessage } from "../shared/utils/api-error";
 
 const ADMIN_LOGIN = "admin";
 const ADMIN_PASSWORD = "111";
@@ -28,10 +29,8 @@ export function AuthPage() {
         localStorage.setItem(USER_ROLE_STORAGE_KEY, response.user.role);
         localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(response.user));
         navigate("/admin-panel");
-      } catch {
-        message.error(
-          "Не удалось войти как администратор. Убедитесь, что API запущен и доступен (см. VITE_API_URL), база данных подключена."
-        );
+      } catch (err: unknown) {
+        message.error(getApiErrorMessage(err, "Не удалось войти как администратор. Проверьте API и настройки CORS."));
       }
       return;
     }
@@ -51,12 +50,9 @@ export function AuthPage() {
   };
 
   return (
-    <Card style={{ maxWidth: 620, margin: "0 auto" }}>
+    <div className="auth-page">
+      <Card className="auth-card">
       <Typography.Title level={3}>Вход в систему</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        Войдите с выданными учетными данными. Если вы сотрудник, логин и пароль создает администратор компании.
-      </Typography.Paragraph>
-
       <Form form={loginForm} layout="vertical">
         <Form.Item
           label="Email или логин"
@@ -72,11 +68,10 @@ export function AuthPage() {
           Войти
         </Button>
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          Демо-админ: логин <code>admin</code>, пароль <code>111</code> — платформенный администратор (регистрация
-          компаний и глобальный список сотрудников только у этой учётки). Сотрудник: email + пароль из администратора
-          компании.
+          Демо-админ: <code>admin</code> / <code>111</code>. Сотрудник: email и пароль от администратора компании.
         </Typography.Paragraph>
       </Form>
-    </Card>
+      </Card>
+    </div>
   );
 }

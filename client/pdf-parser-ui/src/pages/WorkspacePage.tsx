@@ -1,16 +1,26 @@
 import { Badge, Button, Card, Space, Tabs, Typography } from "antd";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
-
-const mockApprovals = [
-  { id: "APP-11", title: "Договор поставки №101", initiator: "Иван Петров", step: "Финансист" },
-  { id: "APP-12", title: "УПД №890", initiator: "Мария Соколова", step: "Юрист" }
-];
+import { approvalsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
 
 export function WorkspacePage() {
   const navigate = useNavigate();
   const location = useLocation();
+
+  const { data: pendingApprovalsTotal = 0 } = useQuery({
+    queryKey: ["my-approvals", "workspace-badge-total"],
+    queryFn: async () => {
+      try {
+        const res = await approvalsApi.listMyApprovals({ page: 1, pageSize: 1 });
+        return res.meta.total;
+      } catch {
+        return 0;
+      }
+    },
+    staleTime: 30_000,
+    enabled: Boolean(getStoredUserProfile())
+  });
   const showAdminTab = useMemo(() => {
     const user = getStoredUserProfile();
     return user ? isPlatformAdminUser(user) : false;
@@ -22,10 +32,7 @@ export function WorkspacePage() {
       label: "Мои документы",
       children: (
         <Card>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Typography.Text type="secondary">
-              Отдельная страница реестра документов уже доступна с таблицей, фильтрами и поиском.
-            </Typography.Text>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Button type="primary" onClick={() => navigate("/my-documents")}>
               Перейти в мои документы
             </Button>
@@ -36,16 +43,13 @@ export function WorkspacePage() {
     {
       key: "my-approvals",
       label: (
-        <Badge count={mockApprovals.length} size="small" offset={[10, 0]}>
+        <Badge count={pendingApprovalsTotal} size="small" offset={[10, 0]}>
           <span>Мои согласования</span>
         </Badge>
       ),
       children: (
         <Card>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Typography.Text type="secondary">
-              Документы, которые пришли вам на согласование по роли.
-            </Typography.Text>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Button type="primary" onClick={() => navigate("/my-approvals")}>
               Перейти в мои согласования
             </Button>
@@ -58,10 +62,7 @@ export function WorkspacePage() {
       label: "Профиль",
       children: (
         <Card>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Typography.Text type="secondary">
-              Профиль вынесен на отдельную страницу с формами обновления данных и смены пароля.
-            </Typography.Text>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Button type="primary" onClick={() => navigate("/profile")}>
               Перейти в профиль
             </Button>
@@ -76,10 +77,7 @@ export function WorkspacePage() {
             label: "Админ-панель",
             children: (
               <Card>
-                <Space direction="vertical" size={16} style={{ width: "100%" }}>
-                  <Typography.Text type="secondary">
-                    Для платформенного администратора: управление компаниями и сотрудниками.
-                  </Typography.Text>
+                <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                   <Button type="primary" onClick={() => navigate("/admin-panel")}>
                     Перейти в админ-панель
                   </Button>
@@ -94,9 +92,6 @@ export function WorkspacePage() {
   return (
     <div>
       <Typography.Title level={3}>Рабочее место</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        Базовый каркас личного кабинета для дальнейшего подключения API и прав доступа.
-      </Typography.Paragraph>
       <Tabs defaultActiveKey="my-documents" items={items} />
     </div>
   );

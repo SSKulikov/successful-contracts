@@ -4,6 +4,16 @@ import { logger } from "../utils/logger";
 let redisClient: Redis | null = null;
 let redisDisabled = false;
 
+function disableRedis(reason: unknown) {
+  logger.error(`❌ Redis disabled, fallback to DB: ${reason}`);
+  redisDisabled = true;
+  if (redisClient) {
+    redisClient.removeAllListeners();
+    redisClient.disconnect();
+    redisClient = null;
+  }
+}
+
 function getRedisClient(): Redis | null {
   if (redisDisabled) return null;
   if (redisClient) return redisClient;
@@ -17,7 +27,8 @@ function getRedisClient(): Redis | null {
   redisClient = new Redis(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
-    enableReadyCheck: true
+    enableReadyCheck: true,
+    retryStrategy: () => null
   });
 
   redisClient.on("error", (error) => {
@@ -35,7 +46,7 @@ async function connectIfNeeded() {
     try {
       await client.connect();
     } catch (error) {
-      logger.error(`❌ Redis connect failed, fallback to DB: ${error}`);
+      disableRedis(error);
       return null;
     }
   }
@@ -109,6 +120,12 @@ export function getMyDocumentsListCachePattern(companyId: number | null): string
 
 export async function invalidateMyDocumentsListCaches(companyId: number | null): Promise<void> {
   await scanDelByPattern(getMyDocumentsListCachePattern(companyId));
+}
+
+/** После изменения документа: кэш списка по компании + списки платформенного админа (`my-docs:all:*`). */
+export async function invalidateMyDocumentsListCachesAfterMutation(documentCompanyId: number | null): Promise<void> {
+  await invalidateMyDocumentsListCaches(documentCompanyId);
+  await scanDelByPattern("my-docs:all:*");
 }
 
 const PARSE_NORM_SHA256_KEY_PREFIX = "parse:norm-sha256:";

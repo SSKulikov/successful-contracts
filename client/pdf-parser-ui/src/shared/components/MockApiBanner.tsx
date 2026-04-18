@@ -9,7 +9,7 @@ export function MockApiBanner() {
       type="info"
       showIcon
       message="Демо-данные"
-      description="Включён мок API (VITE_USE_MOCK_API=true). Ответы не отражают состояние сервера."
+      description="Мок API (VITE_USE_MOCK_API=true), данные не с сервера."
       style={{ marginBottom: 16 }}
     />
   );

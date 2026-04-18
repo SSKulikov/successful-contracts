@@ -3,9 +3,23 @@ import type { EmployeeAccountRow } from "../types/employee-account";
 import { verifyAccessToken } from "./jwt";
 
 const EMPLOYEE_BY_ID_SQL = `
-  SELECT e.id, e.full_name, e.email, e.position, e.roles_json, e.password_value, e.is_temporary_password, e.status, e.company_id
+  SELECT
+    e.id,
+    e.full_name,
+    e.email,
+    e.position,
+    e.roles_json,
+    e.password_value,
+    e.is_temporary_password,
+    e.status,
+    e.company_id,
+    e.deleted_at,
+    e.avatar_url,
+    c.name AS company_name,
+    c.inn AS company_inn
   FROM employees e
-  WHERE e.id = ?
+  LEFT JOIN companies c ON c.id = e.company_id
+  WHERE e.id = ? AND e.deleted_at IS NULL
   LIMIT 1
 `;
 
@@ -27,10 +41,24 @@ export async function getEmployeeByAuthToken(token: string): Promise<EmployeeAcc
 
   const legacy = await prisma.$queryRawUnsafe<EmployeeAccountRow[]>(
     `
-      SELECT e.id, e.full_name, e.email, e.position, e.roles_json, e.password_value, e.is_temporary_password, e.status, e.company_id
+      SELECT
+        e.id,
+        e.full_name,
+        e.email,
+        e.position,
+        e.roles_json,
+        e.password_value,
+        e.is_temporary_password,
+        e.status,
+        e.company_id,
+        e.deleted_at,
+        e.avatar_url,
+        c.name AS company_name,
+        c.inn AS company_inn
       FROM auth_sessions s
       JOIN employees e ON e.id = s.employee_id
-      WHERE s.token = ?
+      LEFT JOIN companies c ON c.id = e.company_id
+      WHERE s.token = ? AND e.deleted_at IS NULL
       LIMIT 1
     `,
     trimmed
