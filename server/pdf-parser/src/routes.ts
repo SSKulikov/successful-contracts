@@ -9,6 +9,7 @@ import {
   updateEmployee
 } from "./controllers/admin.controller";
 import {
+  assignCompanyAdmin,
   createCompany,
   deleteCompany,
   listCompanies,
@@ -62,6 +63,7 @@ router.delete("/admin/employees/:id", requireAuth, requirePasswordNotTemporary, 
 router.get("/admin/companies", requireAuth, requirePlatformAdmin, listCompanies);
 router.post("/admin/companies", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, createCompany);
 router.patch("/admin/companies/:id", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, updateCompany);
+router.post("/admin/companies/:id/assign-admin", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, assignCompanyAdmin);
 router.delete("/admin/companies/:id", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, deleteCompany);
 router.post("/admin/companies/:id/reset-admin", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, resetCompanyAdmin);
 router.get("/admin/routes", requireAuth, requirePlatformAdmin, listRoutesAdmin);
@@ -73,7 +75,7 @@ router.get("/company/employees", requireAuth, listCompanyEmployees);
 router.post("/auth/login", loginRateLimiter, login);
 router.get("/users/me", requireAuth, getMyProfile);
 router.patch("/users/me", requireAuth, requirePasswordNotTemporary, updateMyProfile);
-router.post("/users/me/avatar", requireAuth, handleAvatarUpload, uploadMyAvatar);
+router.post("/users/me/avatar", requireAuth, requirePasswordNotTemporary, handleAvatarUpload, uploadMyAvatar);
 router.post("/users/me/change-password", requireAuth, changeMyPassword);
 router.post("/documents", requireAuth, requirePasswordNotTemporary, createDocument);
 router.get("/documents/my", requireAuth, listMyDocuments);
@@ -87,7 +89,7 @@ router.post("/documents/:id/withdraw", requireAuth, requirePasswordNotTemporary,
 router.delete("/documents/:id", requireAuth, requirePasswordNotTemporary, deleteDocument);
 router.get("/notifications", requireAuth, listNotifications);
 router.get("/notifications/unread-count", requireAuth, getUnreadNotificationsCount);
-router.post("/notifications/:id/read", requireAuth, markNotificationRead);
+router.post("/notifications/:id/read", requireAuth, requirePasswordNotTemporary, markNotificationRead);
 router.get("/approvals/my", requireAuth, listMyApprovals);
 router.post("/approvals/:taskId/approve", requireAuth, requirePasswordNotTemporary, approveTask);
 router.post("/approvals/:taskId/reject", requireAuth, requirePasswordNotTemporary, rejectTask);

@@ -266,6 +266,8 @@ export const PROFILE_PASSWORD_REQUIRED_QUERY = "mustSetPassword";
 
 /** Событие на `window`: пользователь уже на `/profile`, мутация отклонена из-за временного пароля. */
 export const PASSWORD_CHANGE_REQUIRED_CLIENT_EVENT = "docflow-password-change-required";
+/** Событие на `window`: профиль в localStorage обновлён, UI должен перечитать `mustChangePassword`/роль. */
+export const USER_PROFILE_UPDATED_CLIENT_EVENT = "docflow-user-profile-updated";
 
 const httpClient = axios.create({
   baseURL: API_BASE_URL
@@ -991,5 +993,12 @@ export const adminApi = {
     }
     const response = await httpClient.post(`/admin/companies/${id}/reset-admin`);
     return response.data as { message?: string; oneTimePassword?: string };
+  },
+  async assignCompanyAdmin(id: string, payload: { email: string; fullName?: string }) {
+    if (USE_MOCK_API && USE_MOCK_ADMIN_API) {
+      return Promise.resolve({ message: "Администратор назначен (mock)" });
+    }
+    const response = await httpClient.post(`/admin/companies/${id}/assign-admin`, payload);
+    return response.data as { message?: string };
   }
 };

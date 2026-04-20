@@ -4,7 +4,7 @@ import { Alert, Button, Card, DatePicker, Empty, Form, Input, InputNumber, Modal
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
 import {
   SubmitForApprovalModal,
@@ -35,6 +35,7 @@ function renderStatusTag(status: DocumentRow["status"]) {
 
 export function MyDocumentsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [form] = Form.useForm<DocumentFormPayload>();
@@ -295,6 +296,19 @@ export function MyDocumentsPage() {
       message.error(getApiErrorMessage(err, "Не удалось загрузить документ для редактирования"));
     }
   };
+
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (!editId || isLoading) return;
+    const row = data.find((item) => item.id === editId);
+    if (!row) return;
+    void openEditModal(row);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("edit");
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams, data, isLoading]);
 
   const handleModalOk = async () => {
     const values = await form.validateFields();
