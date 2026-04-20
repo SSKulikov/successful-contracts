@@ -702,6 +702,51 @@ storage/
 8. Добавить интеграционные тесты.
 9. Убрать `NODE_TLS_REJECT_UNAUTHORIZED=0` из штатного запуска.
 
+## E2E тесты согласования (approval)
+
+В проекте есть 2 интеграционных сценария для домена согласования:
+
+- `npm run test:e2e:approval-flow` — проверка happy-path:
+  `submit -> approve (несколько шагов) -> документ "Согласован"`.
+- `npm run test:e2e:approval-branches` — проверка веток решений:
+  `revise` и `reject`, включая отмену оставшихся `pending/blocked` задач.
+
+### Переменные окружения для запуска
+
+Оба теста используют одни и те же переменные:
+
+- `STAGING_API_URL` (например `http://localhost:3003/api`)
+- `STAGING_EMAIL` / `STAGING_PASSWORD` (инициатор)
+- `STAGING_EMAIL_B` / `STAGING_PASSWORD_B` (согласующий шага 1)
+- `STAGING_EMAIL_C` / `STAGING_PASSWORD_C` (согласующий шага 2)
+- `STAGING_COMPANY_ID` (опционально, если инициатор — платформенный админ)
+
+### Пример запуска
+
+```bash
+STAGING_API_URL="http://localhost:3003/api" \
+STAGING_EMAIL="a@company.ru" \
+STAGING_PASSWORD="passwordA" \
+STAGING_EMAIL_B="b@company.ru" \
+STAGING_PASSWORD_B="passwordB" \
+STAGING_EMAIL_C="c@company.ru" \
+STAGING_PASSWORD_C="passwordC" \
+npm run test:e2e:approval-flow
+```
+
+```bash
+STAGING_API_URL="http://localhost:3003/api" \
+STAGING_EMAIL="a@company.ru" \
+STAGING_PASSWORD="passwordA" \
+STAGING_EMAIL_B="b@company.ru" \
+STAGING_PASSWORD_B="passwordB" \
+STAGING_EMAIL_C="c@company.ru" \
+STAGING_PASSWORD_C="passwordC" \
+npm run test:e2e:approval-branches
+```
+
+Требования к аккаунтам: активные, не удалённые, одной компании, с валидными (не временными) паролями.
+
 ## API маршрутов согласования (контракт для Dev1)
 
 Маршрут согласования — шаблон цепочки шагов, по которому документ проходит утверждение. Админ создаёт маршрут; при submit документа Dev1 привязывает `route_id` и создаёт задачи по шагам.
