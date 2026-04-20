@@ -119,9 +119,9 @@ async function ensureEmployeeAvatarUrlColumn() {
  * Вызывать после `prisma migrate deploy` на деплое; до миграции колонки могут добавиться здесь при первом логине.
  */
 export async function ensureEmployeesTable() {
-  await ensurePlatformDemoAdmin();
   await ensureEmployeeDeletedAtColumn();
   await ensureEmployeeAvatarUrlColumn();
+  await ensurePlatformDemoAdmin();
 }
 
 export async function ensureAuthSessionsTable() {

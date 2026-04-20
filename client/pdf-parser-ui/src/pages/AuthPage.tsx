@@ -28,6 +28,11 @@ export function AuthPage() {
         localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, response.token);
         localStorage.setItem(USER_ROLE_STORAGE_KEY, response.user.role);
         localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(response.user));
+        if (response.isTemporaryPassword || response.user.mustChangePassword) {
+          message.warning("Вы вошли по одноразовому паролю. Пожалуйста, смените пароль в профиле.");
+          navigate("/profile?mustSetPassword=1");
+          return;
+        }
         navigate("/admin-panel");
       } catch (err: unknown) {
         message.error(getApiErrorMessage(err, "Не удалось войти как администратор. Проверьте API и настройки CORS."));
@@ -42,6 +47,8 @@ export function AuthPage() {
       localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(response.user));
       if (response.isTemporaryPassword || response.user.mustChangePassword) {
         message.warning("Вы вошли по одноразовому паролю. Пожалуйста, смените пароль в профиле.");
+        navigate("/profile?mustSetPassword=1");
+        return;
       }
       navigate("/my-documents");
     } catch (error) {

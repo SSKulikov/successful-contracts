@@ -1,5 +1,5 @@
-import { Button, Layout, Menu } from "antd";
-import { useMemo } from "react";
+import { Button, Layout, Menu, message } from "antd";
+import { useEffect, useMemo } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   AUTH_TOKEN_STORAGE_KEY,
@@ -40,7 +40,18 @@ export function AppLayout() {
   );
 
   const user = getStoredUserProfile();
+  const mustChangePassword = Boolean(user?.mustChangePassword);
   const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
+  const gatedMenuItems = mustChangePassword
+    ? menuItems.map((item) => (item.key === "/profile" ? item : { ...item, disabled: true }))
+    : menuItems;
+
+  useEffect(() => {
+    if (!mustChangePassword) return;
+    if (location.pathname === "/auth" || location.pathname === "/profile") return;
+    message.warning("Сначала смените одноразовый пароль в профиле.");
+    navigate("/profile?mustSetPassword=1", { replace: true });
+  }, [location.pathname, mustChangePassword, navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
@@ -83,8 +94,15 @@ export function AppLayout() {
                 mode="inline"
                 className="app-side-menu"
                 selectedKeys={[selectedKey]}
-                items={menuItems}
-                onClick={({ key }) => navigate(key)}
+                items={gatedMenuItems}
+                onClick={({ key }) => {
+                  if (mustChangePassword && key !== "/profile") {
+                    message.warning("Сначала смените одноразовый пароль в профиле.");
+                    navigate("/profile?mustSetPassword=1");
+                    return;
+                  }
+                  navigate(key);
+                }}
               />
               <div className="app-sider-logout">
                 <Button block onClick={handleLogout}>
