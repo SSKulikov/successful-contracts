@@ -16,7 +16,10 @@
     "test": "tsx --test src/utils/parse-approver-employee-ids.test.ts src/utils/parse-pipeline-cache-key.test.ts",
     "test:e2e": "tsx scripts/staging-e2e.ts",
     "test:e2e:approval-flow": "tsx scripts/approval-flow-e2e.ts",
-    "test:e2e:approval-branches": "tsx scripts/approval-decision-branches-e2e.ts"
+    "test:e2e:approval-branches": "tsx scripts/approval-decision-branches-e2e.ts",
+    "test:e2e:password-gate": "tsx scripts/password-gate-e2e.ts",
+    "test:e2e:soft-delete": "tsx scripts/soft-delete-e2e.ts",
+    "test:e2e:notifications": "tsx scripts/notifications-e2e.ts"
   },
   "keywords": [],
   "license": "ISC",

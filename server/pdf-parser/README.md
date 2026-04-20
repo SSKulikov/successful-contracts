@@ -704,12 +704,19 @@ storage/
 
 ## E2E тесты согласования (approval)
 
-В проекте есть 2 интеграционных сценария для домена согласования:
+В проекте есть интеграционные e2e-сценарии для домена согласования и связанных политик безопасности:
 
 - `npm run test:e2e:approval-flow` — проверка happy-path:
   `submit -> approve (несколько шагов) -> документ "Согласован"`.
 - `npm run test:e2e:approval-branches` — проверка веток решений:
   `revise` и `reject`, включая отмену оставшихся `pending/blocked` задач.
+- `npm run test:e2e:password-gate` — проверка password-gate:
+  блокировка ключевых мутаций при временном пароле и успешная разблокировка после `POST /users/me/change-password`.
+- `npm run test:e2e:soft-delete` — проверка soft delete сотрудников:
+  запрет логина удалённого сотрудника, запрет назначения удалённого в маршрут, отображение `Удаленный пользователь` в истории документа.
+- `npm run test:e2e:notifications` — проверка notifications API и доменных вставок:
+  `/notifications`, `/notifications/unread-count`, `/notifications/:id/read`,
+  а также события `document_submitted`, `approval_step_assigned`, `document_rejected`.
 
 ### Переменные окружения для запуска
 
@@ -719,6 +726,26 @@ storage/
 - `STAGING_EMAIL` / `STAGING_PASSWORD` (инициатор)
 - `STAGING_EMAIL_B` / `STAGING_PASSWORD_B` (согласующий шага 1)
 - `STAGING_EMAIL_C` / `STAGING_PASSWORD_C` (согласующий шага 2)
+- `STAGING_COMPANY_ID` (опционально, если инициатор — платформенный админ)
+
+Для `test:e2e:password-gate` используются отдельные переменные:
+
+- `STAGING_API_URL`
+- `STAGING_PLATFORM_ADMIN_EMAIL` / `STAGING_PLATFORM_ADMIN_PASSWORD` (платформенный админ для reset пароля)
+- `STAGING_GATE_EMAIL` (сотрудник, над которым проверяется gate)
+
+Для `test:e2e:soft-delete` используются переменные:
+
+- `STAGING_API_URL`
+- `STAGING_PLATFORM_ADMIN_EMAIL` / `STAGING_PLATFORM_ADMIN_PASSWORD`
+- `STAGING_SOFT_DELETE_COMPANY_ID` (опционально; если не задан, используется первая компания из `/admin/companies`)
+
+Для `test:e2e:notifications` используются переменные:
+
+- `STAGING_API_URL`
+- `STAGING_EMAIL` / `STAGING_PASSWORD` (инициатор A)
+- `STAGING_EMAIL_B` / `STAGING_PASSWORD_B` (согласующий B)
+- `STAGING_EMAIL_C` / `STAGING_PASSWORD_C` (согласующий C)
 - `STAGING_COMPANY_ID` (опционально, если инициатор — платформенный админ)
 
 ### Пример запуска
@@ -743,6 +770,32 @@ STAGING_PASSWORD_B="passwordB" \
 STAGING_EMAIL_C="c@company.ru" \
 STAGING_PASSWORD_C="passwordC" \
 npm run test:e2e:approval-branches
+```
+
+```bash
+STAGING_API_URL="http://localhost:3003/api" \
+STAGING_PLATFORM_ADMIN_EMAIL="platform-admin@docflow.local" \
+STAGING_PLATFORM_ADMIN_PASSWORD="111" \
+STAGING_GATE_EMAIL="employee@company.ru" \
+npm run test:e2e:password-gate
+```
+
+```bash
+STAGING_API_URL="http://localhost:3003/api" \
+STAGING_PLATFORM_ADMIN_EMAIL="platform-admin@docflow.local" \
+STAGING_PLATFORM_ADMIN_PASSWORD="111" \
+npm run test:e2e:soft-delete
+```
+
+```bash
+STAGING_API_URL="http://localhost:3003/api" \
+STAGING_EMAIL="a@company.ru" \
+STAGING_PASSWORD="passwordA" \
+STAGING_EMAIL_B="b@company.ru" \
+STAGING_PASSWORD_B="passwordB" \
+STAGING_EMAIL_C="c@company.ru" \
+STAGING_PASSWORD_C="passwordC" \
+npm run test:e2e:notifications
 ```
 
 Требования к аккаунтам: активные, не удалённые, одной компании, с валидными (не временными) паролями.
