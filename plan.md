@@ -213,4 +213,19 @@
 
 ---
 
+## TODO: оставшиеся задачи после аудита
+
+- [x] Добавить интеграционные тесты для критичного approval-flow: `submit -> approve (много шагов) -> финальный статус`.
+- [x] Добавить интеграционные тесты для веток `reject` и `revise` (включая отмену оставшихся `pending/blocked` задач).
+- [x] Добавить тесты password-gate (`requirePasswordNotTemporary`) на все ключевые мутации и сценарий успешной разблокировки после `change-password`.
+- [x] Добавить тесты soft delete: запрет логина удалённого сотрудника, поведение маршрутов/истории для удалённых пользователей.
+- [x] Добавить тесты notifications API (`/notifications`, `/notifications/unread-count`, `/notifications/:id/read`) и доменных вставок уведомлений в ключевых событиях.
+
+### Закрыто после аудита (RBAC/Security)
+
+- [x] Ограничить доступ к `GET /api/company/approval-routes` только для администратора компании.
+- [x] Доприменить `requirePasswordNotTemporary` к пропущенным мутациям (`POST /users/me/avatar`, `POST /notifications/:id/read`).
+
+---
+
 *Файл сгенерирован для согласования спринта; при смене состава дней обновите таблицу и DoD.*

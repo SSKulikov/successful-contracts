@@ -1,9 +1,10 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Divider, Input, Modal, Space, Steps, Tag, Timeline, Typography, message } from "antd";
+import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Steps, Tag, Timeline, Typography, message } from "antd";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
+import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 import {
   SubmitForApprovalModal,
   type SubmitForApprovalModalResult
@@ -62,7 +63,9 @@ export function DocumentDetailsPage() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const [editForm] = Form.useForm();
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
@@ -139,6 +142,26 @@ export function DocumentDetailsPage() {
     },
     onError: mutationError
   });
+  const updateDocumentMutation = useMutation({
+    mutationFn: (payload: {
+      type: string;
+      number: string;
+      date: string;
+      customerName: string;
+      customerInn: string;
+      executorName: string;
+      executorInn: string;
+      amount: number;
+      subject: string;
+      note?: string;
+    }) => documentsApi.updateDocument(id, payload),
+    onSuccess: () => {
+      message.success("Документ обновлен");
+      setEditModalOpen(false);
+      invalidateAll();
+    },
+    onError: mutationError
+  });
 
   const actionInProgress =
     approveMutation.isPending ||
@@ -195,6 +218,28 @@ export function DocumentDetailsPage() {
       return;
     }
     setSubmitRouteModalOpen(true);
+  };
+
+  const openEditModal = () => {
+    if (!data) return;
+    editForm.setFieldsValue({
+      type: data.type,
+      number: data.fields?.number ?? "",
+      date: data.fields?.date ?? "",
+      customerName: data.fields?.customerName ?? "",
+      customerInn: data.fields?.customerInn ?? "",
+      executorName: data.fields?.executorName ?? "",
+      executorInn: data.fields?.executorInn ?? "",
+      amount: Number(String(data.amount).replace(",", ".")) || 0,
+      subject: data.fields?.subject ?? "",
+      note: data.fields?.note ?? ""
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEditedDocument = async () => {
+    const values = await editForm.validateFields();
+    await updateDocumentMutation.mutateAsync(values);
   };
 
   const handleSubmitForApproval = async (result: SubmitForApprovalModalResult) => {
@@ -262,7 +307,7 @@ export function DocumentDetailsPage() {
         </Typography.Text>
         <Space wrap style={{ marginBottom: 8 }}>
           {data?.canEditDocumentFields ? (
-            <Button disabled={actionInProgress} onClick={() => navigate("/my-documents")}>
+            <Button disabled={actionInProgress} onClick={openEditModal}>
               Редактировать
             </Button>
           ) : null}
@@ -409,6 +454,47 @@ export function DocumentDetailsPage() {
         onClose={() => setSubmitRouteModalOpen(false)}
         onSubmit={handleSubmitForApproval}
       />
+      <Modal
+        title="Редактировать документ"
+        open={editModalOpen}
+        onOk={() => void handleSaveEditedDocument()}
+        onCancel={() => setEditModalOpen(false)}
+        confirmLoading={updateDocumentMutation.isPending}
+        width={760}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="type" label="Тип документа" rules={[{ required: true, message: "Укажите тип документа" }]}>
+            <Select options={DOCUMENT_TYPE_SELECT_OPTIONS} placeholder="Выберите тип" />
+          </Form.Item>
+          <Form.Item name="number" label="Номер" rules={[{ required: true, message: "Укажите номер" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="date" label="Дата" rules={[{ required: true, message: "Укажите дату (YYYY-MM-DD)" }]}>
+            <Input placeholder="YYYY-MM-DD" />
+          </Form.Item>
+          <Form.Item name="customerName" label="Наименование заказчика" rules={[{ required: true, message: "Укажите заказчика" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="customerInn" label="ИНН заказчика" rules={[{ required: true, message: "Укажите ИНН заказчика" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="executorName" label="Наименование исполнителя" rules={[{ required: true, message: "Укажите исполнителя" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="executorInn" label="ИНН исполнителя" rules={[{ required: true, message: "Укажите ИНН исполнителя" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="amount" label="Сумма" rules={[{ required: true, message: "Укажите сумму" }]}>
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="subject" label="Основание / предмет" rules={[{ required: true, message: "Укажите предмет документа" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="note" label="Примечание">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
 }

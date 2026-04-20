@@ -8,6 +8,7 @@ import {
   AUTH_USER_STORAGE_KEY,
   USER_ROLE_STORAGE_KEY,
   PASSWORD_CHANGE_REQUIRED_CLIENT_EVENT,
+  USER_PROFILE_UPDATED_CLIENT_EVENT,
   PROFILE_PASSWORD_REQUIRED_QUERY,
   UserProfile,
   getStoredUserProfile,
@@ -45,6 +46,7 @@ export function ProfilePage() {
       if (updatedProfile.role) {
         localStorage.setItem(USER_ROLE_STORAGE_KEY, updatedProfile.role);
       }
+      window.dispatchEvent(new Event(USER_PROFILE_UPDATED_CLIENT_EVENT));
       message.success("Профиль обновлен");
       queryClient.invalidateQueries({ queryKey: ["my-profile"] });
     },
@@ -56,6 +58,7 @@ export function ProfilePage() {
     mutationFn: profileApi.uploadAvatar,
     onSuccess: (updated: UserProfile) => {
       localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(updated));
+      window.dispatchEvent(new Event(USER_PROFILE_UPDATED_CLIENT_EVENT));
       queryClient.setQueryData(["my-profile"], updated);
       message.success("Фото профиля обновлено");
       queryClient.invalidateQueries({ queryKey: ["my-profile"] });
@@ -72,6 +75,7 @@ export function ProfilePage() {
       try {
         const updated = await profileApi.getMyProfile();
         localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event(USER_PROFILE_UPDATED_CLIENT_EVENT));
         queryClient.invalidateQueries({ queryKey: ["my-profile"] });
       } catch {
         queryClient.invalidateQueries({ queryKey: ["my-profile"] });
@@ -89,6 +93,7 @@ export function ProfilePage() {
     try {
       const prev = getStoredUserProfile();
       localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify({ ...prev, ...profile }));
+      window.dispatchEvent(new Event(USER_PROFILE_UPDATED_CLIENT_EVENT));
     } catch {
       /* ignore quota / private mode */
     }

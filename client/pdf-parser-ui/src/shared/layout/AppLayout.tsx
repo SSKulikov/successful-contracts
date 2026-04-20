@@ -1,9 +1,10 @@
-import { Button, Layout, Menu } from "antd";
-import { useMemo } from "react";
+import { Button, Layout, Menu, message } from "antd";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   AUTH_TOKEN_STORAGE_KEY,
   AUTH_USER_STORAGE_KEY,
+  USER_PROFILE_UPDATED_CLIENT_EVENT,
   USER_ROLE_STORAGE_KEY,
   getStoredUserProfile,
   isPlatformAdminUser
@@ -15,6 +16,7 @@ const { Header, Content, Sider } = Layout;
 export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [profileVersion, setProfileVersion] = useState(0);
 
   const hideSidebar = location.pathname === "/" || location.pathname === "/auth";
   const showHeader = hideSidebar;
@@ -40,7 +42,28 @@ export function AppLayout() {
   );
 
   const user = getStoredUserProfile();
+  const mustChangePassword = Boolean(user?.mustChangePassword);
   const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
+  const gatedMenuItems = mustChangePassword
+    ? menuItems.map((item) => (item.key === "/profile" ? item : { ...item, disabled: true }))
+    : menuItems;
+
+  useEffect(() => {
+    const syncProfileState = () => setProfileVersion((v) => v + 1);
+    window.addEventListener(USER_PROFILE_UPDATED_CLIENT_EVENT, syncProfileState);
+    window.addEventListener("storage", syncProfileState);
+    return () => {
+      window.removeEventListener(USER_PROFILE_UPDATED_CLIENT_EVENT, syncProfileState);
+      window.removeEventListener("storage", syncProfileState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mustChangePassword) return;
+    if (location.pathname === "/auth" || location.pathname === "/profile") return;
+    message.warning("Сначала смените одноразовый пароль в профиле.");
+    navigate("/profile?mustSetPassword=1", { replace: true });
+  }, [location.pathname, mustChangePassword, navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
@@ -83,8 +106,15 @@ export function AppLayout() {
                 mode="inline"
                 className="app-side-menu"
                 selectedKeys={[selectedKey]}
-                items={menuItems}
-                onClick={({ key }) => navigate(key)}
+                items={gatedMenuItems}
+                onClick={({ key }) => {
+                  if (mustChangePassword && key !== "/profile") {
+                    message.warning("Сначала смените одноразовый пароль в профиле.");
+                    navigate("/profile?mustSetPassword=1");
+                    return;
+                  }
+                  navigate(key);
+                }}
               />
               <div className="app-sider-logout">
                 <Button block onClick={handleLogout}>
@@ -95,6 +125,8 @@ export function AppLayout() {
           </Sider>
         )}
         <Content className={hideSidebar ? "app-content" : "app-content app-content-with-sider"}>
+          {/* Зависимость от версии профиля, чтобы моментально применять гейт после смены пароля. */}
+          <div data-profile-version={profileVersion} style={{ display: "none" }} />
           <Outlet />
         </Content>
       </Layout>

@@ -436,6 +436,10 @@ export async function listCompanyRoutes(req: Request, res: Response): Promise<vo
     await ensureApprovalDomainTables();
 
     const employee = req.authContext!;
+    if (employee.role !== "admin") {
+      res.status(403).json({ message: "Маршруты компании доступны только администратору компании" });
+      return;
+    }
     if (!employee.companyId) {
       res.status(403).json({ message: "У вас нет привязки к компании" });
       return;

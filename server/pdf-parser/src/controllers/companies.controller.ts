@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../prisma";
 import { hashPassword } from "../utils/passwords";
-import { ensureEmployeesTable, generateOneTimePassword } from "./admin.controller";
+import { ensureEmployeesTable, generateOneTimePassword, PLATFORM_DEMO_ADMIN_EMAIL } from "./admin.controller";
 import { logger } from "../utils/logger";
 import { companyAdminRoleSqlCondition, countCompanyAdminsTx } from "../utils/company-roles";
 
@@ -111,11 +111,26 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const dupEmailRows = await prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
-      `SELECT COUNT(*) AS c FROM employees WHERE email = ? AND deleted_at IS NULL`,
+    const existingEmployeeRows = await prisma.$queryRawUnsafe<
+      Array<{ id: number; company_id: number | null; deleted_at: Date | null }>
+    >(
+      `SELECT id, company_id, deleted_at FROM employees WHERE email = ? LIMIT 1`,
       email
     );
-    if (Number(dupEmailRows[0]?.c ?? 0) > 0) {
+
+    if (email === PLATFORM_DEMO_ADMIN_EMAIL) {
+      res.status(409).json({
+        message:
+          "Этот email зарезервирован для платформенного администратора и не может использоваться как админ компании."
+      });
+      return;
+    }
+
+    const existingEmployee = existingEmployeeRows[0] ?? null;
+    const canReuseExistingEmployee =
+      Boolean(existingEmployee) && existingEmployee!.deleted_at === null && existingEmployee!.company_id == null;
+
+    if (existingEmployee && !canReuseExistingEmployee) {
       res.status(409).json({
         message:
           "Этот email уже зарегистрирован. Войдите на странице входа с тем же email и паролем; повторная регистрация компании не нужна."
@@ -147,21 +162,38 @@ export async function createCompany(req: Request, res: Response): Promise<void> 
         throw new Error("COMPANY_ALREADY_HAS_ADMIN");
       }
 
-      await tx.$executeRawUnsafe(
-        `
-        INSERT INTO employees
-          (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        adminFullName,
-        email,
-        "Администратор",
-        JSON.stringify(["admin"]),
-        passwordHash,
-        0,
-        "Активен",
-        companyId
-      );
+      if (canReuseExistingEmployee && existingEmployee) {
+        await tx.$executeRawUnsafe(
+          `
+          UPDATE employees
+          SET full_name = ?, position = ?, roles_json = ?, password_value = ?, is_temporary_password = 0, status = ?, company_id = ?, deleted_at = NULL
+          WHERE id = ?
+          `,
+          adminFullName,
+          "Администратор",
+          JSON.stringify(["admin"]),
+          passwordHash,
+          "Активен",
+          companyId,
+          existingEmployee.id
+        );
+      } else {
+        await tx.$executeRawUnsafe(
+          `
+          INSERT INTO employees
+            (full_name, email, position, roles_json, password_value, is_temporary_password, status, company_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+          adminFullName,
+          email,
+          "Администратор",
+          JSON.stringify(["admin"]),
+          passwordHash,
+          0,
+          "Активен",
+          companyId
+        );
+      }
 
       if ((await countCompanyAdminsTx(tx, companyId)) !== 1) {
         throw new Error("COMPANY_ADMIN_COUNT_INVALID");
@@ -200,6 +232,38 @@ type UpdateCompanyBody = {
   inn?: string;
   adminFullName?: string;
 };
+
+type AssignCompanyAdminBody = {
+  email?: string;
+  fullName?: string;
+};
+
+function ensureAdminRole(rolesJsonRaw: string | null): string {
+  let roles: string[] = [];
+  try {
+    const parsed = JSON.parse(String(rolesJsonRaw ?? "[]"));
+    if (Array.isArray(parsed)) {
+      roles = parsed.filter((v) => typeof v === "string" && v.trim().length > 0);
+    }
+  } catch {
+    roles = [];
+  }
+  if (!roles.includes("admin")) roles.push("admin");
+  return JSON.stringify(roles);
+}
+
+function removeAdminRole(rolesJsonRaw: string | null): string {
+  let roles: string[] = [];
+  try {
+    const parsed = JSON.parse(String(rolesJsonRaw ?? "[]"));
+    if (Array.isArray(parsed)) {
+      roles = parsed.filter((v) => typeof v === "string" && v.trim().length > 0);
+    }
+  } catch {
+    roles = [];
+  }
+  return JSON.stringify(roles.filter((r) => r !== "admin"));
+}
 
 export async function updateCompany(req: Request, res: Response): Promise<void> {
   try {
@@ -315,6 +379,114 @@ export async function deleteCompany(req: Request, res: Response): Promise<void> 
     res.status(500).json({
       message: "Ошибка удаления компании",
       error: error instanceof Error ? error.message : error
+    });
+  }
+}
+
+export async function assignCompanyAdmin(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureEmployeesTable();
+
+    const companyId = Number(req.params.id);
+    if (!companyId || Number.isNaN(companyId)) {
+      res.status(400).json({ message: "Некорректный id компании" });
+      return;
+    }
+
+    const body: AssignCompanyAdminBody = req.body ?? {};
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const fullName = String(body.fullName ?? "").trim();
+    if (!email) {
+      res.status(400).json({ message: "Укажите email сотрудника" });
+      return;
+    }
+
+    if (email === PLATFORM_DEMO_ADMIN_EMAIL) {
+      res.status(409).json({ message: "Этот email зарезервирован для платформенного администратора" });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const companyRows = await tx.$queryRawUnsafe<Array<{ id: number }>>(
+        `SELECT id FROM companies WHERE id = ? FOR UPDATE`,
+        companyId
+      );
+      if (!companyRows[0]) {
+        throw new Error("COMPANY_NOT_FOUND");
+      }
+
+      const candidateRows = await tx.$queryRawUnsafe<
+        Array<{ id: number; full_name: string; company_id: number | null; deleted_at: Date | null; roles_json: string | null }>
+      >(
+        `SELECT id, full_name, company_id, deleted_at, roles_json FROM employees WHERE email = ? LIMIT 1 FOR UPDATE`,
+        email
+      );
+      const candidate = candidateRows[0];
+      if (!candidate) {
+        throw new Error("CANDIDATE_NOT_FOUND");
+      }
+      if (candidate.deleted_at) {
+        throw new Error("CANDIDATE_DELETED");
+      }
+      if (candidate.company_id !== null && candidate.company_id !== companyId) {
+        throw new Error("CANDIDATE_IN_OTHER_COMPANY");
+      }
+
+      const currentAdmins = await tx.$queryRawUnsafe<Array<{ id: number; roles_json: string | null }>>(
+        `SELECT id, roles_json FROM employees WHERE company_id = ? AND deleted_at IS NULL AND ${companyAdminRoleSqlCondition()} FOR UPDATE`,
+        companyId
+      );
+
+      for (const row of currentAdmins) {
+        if (row.id === candidate.id) continue;
+        await tx.$executeRawUnsafe(
+          `UPDATE employees SET roles_json = ? WHERE id = ?`,
+          removeAdminRole(row.roles_json),
+          row.id
+        );
+      }
+
+      await tx.$executeRawUnsafe(
+        `
+        UPDATE employees
+        SET full_name = ?, position = ?, roles_json = ?, status = ?, company_id = ?, deleted_at = NULL
+        WHERE id = ?
+        `,
+        fullName || candidate.full_name,
+        "Администратор",
+        ensureAdminRole(candidate.roles_json),
+        "Активен",
+        companyId,
+        candidate.id
+      );
+    });
+
+    logger.info(`✅ Назначен администратор компании id=${companyId}: ${email}`);
+    res.json({ message: "Администратор компании назначен" });
+  } catch (error) {
+    const message = getFullErrorText(error);
+    logger.error(`❌ Ошибка назначения администратора компании: ${message}`);
+
+    if (message.includes("COMPANY_NOT_FOUND")) {
+      res.status(404).json({ message: "Компания не найдена" });
+      return;
+    }
+    if (message.includes("CANDIDATE_NOT_FOUND")) {
+      res.status(404).json({ message: "Сотрудник с таким email не найден" });
+      return;
+    }
+    if (message.includes("CANDIDATE_DELETED")) {
+      res.status(409).json({ message: "Сотрудник с таким email удалён и не может быть назначен администратором" });
+      return;
+    }
+    if (message.includes("CANDIDATE_IN_OTHER_COMPANY")) {
+      res.status(409).json({ message: "Сотрудник уже привязан к другой компании" });
+      return;
+    }
+
+    res.status(500).json({
+      message: "Ошибка назначения администратора компании",
+      error: message
     });
   }
 }

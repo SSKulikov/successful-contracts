@@ -227,6 +227,22 @@ export function AdminPanelPage() {
       message.error(msg ?? "Не удалось сохранить изменения");
     }
   });
+  const assignCompanyAdminMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: { email: string; fullName?: string } }) =>
+      adminApi.assignCompanyAdmin(id, payload),
+    onSuccess: () => {
+      message.success("Администратор компании назначен");
+      queryClient.invalidateQueries({ queryKey: ["admin-companies"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
+          ? (err.response as { data?: { message?: string } }).data?.message
+          : undefined;
+      message.error(msg ?? "Не удалось назначить администратора");
+    }
+  });
   const deleteCompanyMutation = useMutation({
     mutationFn: adminApi.deleteCompany,
     onSuccess: () => {
@@ -344,7 +360,8 @@ export function AdminPanelPage() {
               companyEditForm.setFieldsValue({
                 companyName: record.companyName,
                 inn: record.inn,
-                adminFullName: record.adminFullName
+                adminFullName: record.adminFullName,
+                adminEmail: ""
               });
               setCompanyEditOpen(true);
             }}
@@ -530,6 +547,15 @@ export function AdminPanelPage() {
   const handleCompanyEditOk = async () => {
     const values = await companyEditForm.validateFields();
     if (!editingCompany) return;
+    const adminEmail = String(values.adminEmail ?? "").trim().toLowerCase();
+    if (adminEmail) {
+      const candidate = employees.find((e) => e.email.trim().toLowerCase() === adminEmail);
+      const targetCompanyId = Number(editingCompany.key);
+      if (candidate && candidate.roles.includes("admin") && candidate.companyId != null && candidate.companyId !== targetCompanyId) {
+        message.error("Нельзя назначить этого сотрудника: он уже администратор другой компании.");
+        return;
+      }
+    }
     await updateCompanyMutation.mutateAsync({
       id: editingCompany.key,
       payload: {
@@ -538,6 +564,12 @@ export function AdminPanelPage() {
         adminFullName: values.adminFullName
       }
     });
+    if (adminEmail) {
+      await assignCompanyAdminMutation.mutateAsync({
+        id: editingCompany.key,
+        payload: { email: adminEmail, fullName: values.adminFullName }
+      });
+    }
   };
 
   const handleCompanyEditCancel = () => {
@@ -751,7 +783,7 @@ export function AdminPanelPage() {
         onCancel={handleCompanyEditCancel}
         destroyOnHidden
         okText="Сохранить"
-        confirmLoading={updateCompanyMutation.isPending}
+        confirmLoading={updateCompanyMutation.isPending || assignCompanyAdminMutation.isPending}
       >
         <Form form={companyEditForm} layout="vertical">
           <Form.Item
@@ -770,6 +802,14 @@ export function AdminPanelPage() {
             rules={[{ required: true, message: "Укажите ФИО" }]}
           >
             <Input />
+          </Form.Item>
+          <Form.Item
+            label="Email администратора (существующий сотрудник без компании)"
+            name="adminEmail"
+            tooltip="Необязательно. Если заполнено, система назначит админом сотрудника с этим email."
+            rules={[{ type: "email", message: "Введите корректный email" }]}
+          >
+            <Input placeholder="user@company.ru" />
           </Form.Item>
         </Form>
       </Modal>
