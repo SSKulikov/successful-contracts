@@ -7,19 +7,29 @@ dotenv.config();
 const MAX_REQUEST_ATTEMPT = 3;
 
 export class YaGptService {
-  private OAuthToken: string;
+  private oAuthToken: string;
   private bearerToken: string;
-  private cloudId: string;
+  private folderId: string;
+
   constructor() {
-    this.OAuthToken = process.env.OAUTH_TOKEN ?? "";
-    this.bearerToken = "";
-    this.cloudId = "";
+    this.oAuthToken = process.env.OAUTH_TOKEN ?? "";
+    this.bearerToken = process.env.BEARER_TOKEN ?? "";
+    this.folderId = process.env.FOLDER_ID ?? "";
   }
 
   async main() {}
 
-  async getAccessToken() {
-    let data = { yandexPassportOauthToken: this.OAuthToken };
+  private async getAccessToken() {
+    if (!this.oAuthToken && this.bearerToken) {
+      return;
+    }
+    if (!this.oAuthToken) {
+      throw new Error(
+        "Не задан OAUTH_TOKEN и отсутствует BEARER_TOKEN для YaGptService"
+      );
+    }
+
+    const data = { yandexPassportOauthToken: this.oAuthToken };
     const url = "https://iam.api.cloud.yandex.net/iam/v1/tokens";
     const result = await axios.request({
       method: "post",
@@ -34,37 +44,25 @@ export class YaGptService {
     this.bearerToken = result.data.iamToken;
   }
 
-  async getCloudId() {
-    // logger.info("bearwwwwwerToken===>", this.bearerToken);
-    const url =
-      "https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders?cloudId=b1gupme08lkmf5h6m90d";
-    const result = await axios.request({
-      method: "get",
-      maxBodyLength: Infinity,
-      url,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.bearerToken}`,
-      },
-    });
-    // logger.info(result.data);
-    this.cloudId = result.data.folders[1].id;
-  }
-
   async makeRequest(text: string, request: string) {
+    if (!this.folderId) {
+      throw new Error("Не задан FOLDER_ID для YaGptService");
+    }
+
     let dataResult = null;
     let attempt = 0;
+
     while (attempt < MAX_REQUEST_ATTEMPT) {
       attempt++;
       try {
         logger.info(
           `Попытка запроса к YaGPT №${attempt} из ${MAX_REQUEST_ATTEMPT}`
         );
+
         await this.getAccessToken();
-        await this.getCloudId();
-        // logger.info("cloudId====>", this.cloudId);
-        let data = JSON.stringify({
-          modelUri: `gpt://${this.cloudId}/yandexgpt/latest`,
+
+        const data = JSON.stringify({
+          modelUri: `gpt://${this.folderId}/yandexgpt/latest`,
           completionOptions: {
             stream: false,
             temperature: 0.6,
@@ -85,13 +83,14 @@ export class YaGptService {
           ],
         });
 
-        let config = {
+        const config = {
           method: "post",
           maxBodyLength: Infinity,
           url: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.bearerToken}`,
+            "x-folder-id": this.folderId,
           },
           data,
         };

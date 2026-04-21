@@ -18,14 +18,27 @@ import { ValidatorService } from "../services/ValidatorService";
 import { parsedData } from "../dto";
 import { GigaChatService } from "../services/GigaChatService";
 import { sha256HexOfFileBytes, sha256HexOfStableJson } from "../utils/stableContentHash";
+import { YaGptService } from "../services/YaGptService";
+import { allRequisitesPrompt } from "../consts/prompts";
 
 const pdf = new PdfService();
 const word = new WordService();
 const parse = new RegExService();
 const gigaChat = new GigaChatService();
+const yandexGpt = new YaGptService();
 const validator = new ValidatorService();
 
 const RASTER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const SUPPORTED_LLM_PROVIDERS = new Set(["gigachat", "yagpt"]);
+
+function resolveLlmProvider(): "gigachat" | "yagpt" {
+  const raw = (process.env.LLM_PROVIDER ?? "gigachat").trim().toLowerCase();
+  if (SUPPORTED_LLM_PROVIDERS.has(raw)) {
+    return raw as "gigachat" | "yagpt";
+  }
+  logger.warn(`Неизвестный LLM_PROVIDER='${raw}', используется gigachat`);
+  return "gigachat";
+}
 
 async function parseFunc(filename: string, fileExtension: string, rasterSourceAbsolutePath?: string) {
   let parsedData: parsedData = {
@@ -88,10 +101,14 @@ async function parseFunc(filename: string, fileExtension: string, rasterSourceAb
 
 
   const results = [];
+  const llmProvider = resolveLlmProvider();
 
   for (const data of documentArr) {
     try {
-      const result = await gigaChat.makeRequest(data);
+      const result =
+        llmProvider === "yagpt"
+          ? await yandexGpt.makeRequest(data, allRequisitesPrompt)
+          : await gigaChat.makeRequest(data);
       if (!result) {
         results.push({ status: "rejected", reason: "Empty result" });
         continue;
