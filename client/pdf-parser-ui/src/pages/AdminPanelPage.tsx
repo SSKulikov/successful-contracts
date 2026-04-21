@@ -1,6 +1,6 @@
 import { DeleteOutlined, PlusOutlined, RedoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Checkbox, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import { Button, Card, Checkbox, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -13,7 +13,12 @@ import {
   getStoredUserProfile,
   isPlatformAdminUser
 } from "../shared/api";
+import { PageHeader } from "../shared/components/PageHeader";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
+import { ApiErrorState } from "../shared/components/ApiErrorState";
+import { getApiErrorMessage } from "../shared/utils/api-error";
+import { confirmDangerAction } from "../shared/utils/confirm-actions";
+import { useSingleFlight } from "../shared/utils/useSingleFlight";
 
 const ROLE_OPTIONS = [
   { value: "admin", label: "Администратор" },
@@ -46,6 +51,7 @@ export function AdminPanelPage() {
   const [selectedRouteCompanyId, setSelectedRouteCompanyId] = useState<number | null>(null);
   const [routeEditOpen, setRouteEditOpen] = useState(false);
   const [editingRoute, setEditingRoute] = useState<RouteRow | null>(null);
+  const { runSingleFlight, isSingleFlight } = useSingleFlight();
 
   useEffect(() => {
     const user = getStoredUserProfile();
@@ -56,18 +62,20 @@ export function AdminPanelPage() {
   }, [navigate]);
 
   const queryClient = useQueryClient();
-  const { data: employees = [], isLoading: isEmployeesLoading } = useQuery({
+  const { data: employees = [], isLoading: isEmployeesLoading, isError: isEmployeesError, error: employeesError, refetch: refetchEmployees } = useQuery({
     queryKey: ["admin-employees"],
     queryFn: adminApi.listEmployees
   });
-  const { data: routes = [], isLoading: isRoutesLoading } = useQuery<RouteRow[]>({
+  const { data: routes = [], isLoading: isRoutesLoading, isError: isRoutesError, error: routesError, refetch: refetchRoutes } = useQuery<RouteRow[]>({
     queryKey: ["admin-routes"],
     queryFn: () => adminApi.listRoutes()
   });
-  const { data: companies = [], isLoading: isCompaniesLoading } = useQuery({
+  const { data: companies = [], isLoading: isCompaniesLoading, isError: isCompaniesError, error: companiesError, refetch: refetchCompanies } = useQuery({
     queryKey: ["admin-companies"],
     queryFn: adminApi.listCompanies
   });
+  const adminQueryError = employeesError ?? routesError ?? companiesError;
+  const hasAdminQueryError = isEmployeesError || isRoutesError || isCompaniesError;
 
   const companyEmployees = useMemo(
     () => employees.filter((e) => selectedRouteCompanyId != null && Number(e.key) > 0 && e.companyId === selectedRouteCompanyId),
@@ -273,11 +281,7 @@ export function AdminPanelPage() {
       key: "roles",
       width: 220,
       render: (roles: string[]) => (
-        <Space wrap>
-          {roles.map((role) => (
-            <Tag key={role}>{role}</Tag>
-          ))}
-        </Space>
+        <Typography.Text>{roles.map((role) => ROLE_LABEL_MAP[role] ?? role).join(", ")}</Typography.Text>
       )
     },
     {
@@ -318,26 +322,41 @@ export function AdminPanelPage() {
             icon={<RedoOutlined />}
             disabled={Boolean(record.deletedAt)}
             loading={
-              resetEmployeePasswordMutation.isPending &&
-              resetEmployeePasswordMutation.variables === record.key
+              (resetEmployeePasswordMutation.isPending &&
+                resetEmployeePasswordMutation.variables === record.key) ||
+              isSingleFlight(`reset-employee-password-${record.key}`)
             }
-            onClick={() => resetEmployeePasswordMutation.mutate(record.key)}
+            onClick={() =>
+              void runSingleFlight(`reset-employee-password-${record.key}`, () =>
+                resetEmployeePasswordMutation.mutateAsync(record.key)
+              )
+            }
           >
             Сбросить пароль
           </Button>
-          <Popconfirm
-            title="Пометить сотрудника как удалённого?"
-            description="Вход будет заблокирован."
-            okText="Удалить"
-            cancelText="Отмена"
-            okButtonProps={{ danger: true }}
+          <Button
+            type="link"
+            danger
+            loading={
+              (deleteEmployeeMutation.isPending && deleteEmployeeMutation.variables === record.key) ||
+              isSingleFlight(`delete-employee-${record.key}`)
+            }
             disabled={record.email === PLATFORM_DEMO_ADMIN_EMAIL || Boolean(record.deletedAt)}
-            onConfirm={() => deleteEmployeeMutation.mutateAsync(record.key)}
+            onClick={() =>
+              confirmDangerAction({
+                title: "Пометить сотрудника как удалённого?",
+                content: "Вход будет заблокирован.",
+                okText: "Удалить",
+                onOk: async () => {
+                  await runSingleFlight(`delete-employee-${record.key}`, () =>
+                    deleteEmployeeMutation.mutateAsync(record.key)
+                  );
+                }
+              })
+            }
           >
-            <Button type="link" danger loading={deleteEmployeeMutation.isPending} disabled={record.email === PLATFORM_DEMO_ADMIN_EMAIL}>
-              Удалить
-            </Button>
-          </Popconfirm>
+            Удалить
+          </Button>
         </Space>
       )
     }
@@ -371,21 +390,40 @@ export function AdminPanelPage() {
           <Button
             type="link"
             icon={<RedoOutlined />}
-            onClick={() => resetCompanyAdminMutation.mutate(record.key)}
+            loading={
+              (resetCompanyAdminMutation.isPending && resetCompanyAdminMutation.variables === record.key) ||
+              isSingleFlight(`reset-company-admin-${record.key}`)
+            }
+            onClick={() =>
+              void runSingleFlight(`reset-company-admin-${record.key}`, () =>
+                resetCompanyAdminMutation.mutateAsync(record.key)
+              )
+            }
           >
             Сбросить сотрудника
           </Button>
-          <Popconfirm
-            title="Удалить компанию из списка?"
-            okText="Удалить"
-            cancelText="Отмена"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => deleteCompanyMutation.mutate(record.key)}
+          <Button
+            type="link"
+            danger
+            loading={
+              (deleteCompanyMutation.isPending && deleteCompanyMutation.variables === record.key) ||
+              isSingleFlight(`delete-company-${record.key}`)
+            }
+            onClick={() =>
+              confirmDangerAction({
+                title: "Удалить компанию из списка?",
+                content: "Данные компании и связанные настройки будут недоступны.",
+                okText: "Удалить",
+                onOk: async () => {
+                  await runSingleFlight(`delete-company-${record.key}`, () =>
+                    deleteCompanyMutation.mutateAsync(record.key)
+                  );
+                }
+              })
+            }
           >
-            <Button type="link" danger>
-              Удалить
-            </Button>
-          </Popconfirm>
+            Удалить
+          </Button>
         </Space>
       )
     }
@@ -462,17 +500,28 @@ export function AdminPanelPage() {
           >
             Изменить
           </Button>
-          <Popconfirm
-            title="Удалить маршрут?"
-            okText="Удалить"
-            cancelText="Отмена"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => deleteRouteMutation.mutate(record.id)}
+          <Button
+            type="link"
+            danger
+            loading={
+              (deleteRouteMutation.isPending && deleteRouteMutation.variables === record.id) ||
+              isSingleFlight(`delete-route-${record.id}`)
+            }
+            onClick={() =>
+              confirmDangerAction({
+                title: "Удалить маршрут?",
+                content: "Маршрут будет удален без возможности восстановления.",
+                okText: "Удалить",
+                onOk: async () => {
+                  await runSingleFlight(`delete-route-${record.id}`, () =>
+                    deleteRouteMutation.mutateAsync(record.id)
+                  );
+                }
+              })
+            }
           >
-            <Button type="link" danger>
-              Удалить
-            </Button>
-          </Popconfirm>
+            Удалить
+          </Button>
         </Space>
       )
     }
@@ -616,8 +665,24 @@ export function AdminPanelPage() {
   };
 
   return (
-    <div>
-      <Typography.Title level={3}>Админ-панель</Typography.Title>
+    <div className="page-shell">
+      <PageHeader title="Админ-панель" subtitle="Управление сотрудниками, маршрутами согласования и компаниями." />
+      <Typography.Paragraph type="secondary" style={{ marginTop: -6, marginBottom: 16 }}>
+        Рекомендуемый порядок: зарегистрируйте компанию → добавьте сотрудников и роли → настройте маршрут согласования.
+      </Typography.Paragraph>
+      {hasAdminQueryError ? (
+        <ApiErrorState
+          title="Не удалось загрузить данные админ-панели"
+          description={getApiErrorMessage(adminQueryError)}
+          onRetry={() => {
+            void refetchEmployees();
+            void refetchRoutes();
+            void refetchCompanies();
+          }}
+          fallbackText="Перейти к документам"
+          onFallback={() => navigate("/my-documents")}
+        />
+      ) : null}
       <Modal
         title="Редактировать маршрут"
         open={routeEditOpen}
@@ -940,6 +1005,7 @@ export function AdminPanelPage() {
 
                 <Card title="Список сотрудников">
                   <Table
+                    className="app-table"
                     columns={employeeColumns}
                     dataSource={employees}
                     loading={isEmployeesLoading}
@@ -1108,7 +1174,7 @@ export function AdminPanelPage() {
                 </Card>
 
                 <Card title="Список маршрутов">
-                  <Table columns={routeColumns} dataSource={routes} rowKey="id" loading={isRoutesLoading} pagination={{ pageSize: 8 }} />
+                  <Table className="app-table" columns={routeColumns} dataSource={routes} rowKey="id" loading={isRoutesLoading} pagination={{ pageSize: 8 }} />
                 </Card>
               </Space>
             )
@@ -1188,6 +1254,7 @@ export function AdminPanelPage() {
             children: (
               <Card title="Список зарегистрированных компаний">
                 <Table
+                  className="app-table"
                   columns={companyColumns}
                   dataSource={companies}
                   loading={isCompaniesLoading}

@@ -1,4 +1,4 @@
-import { Alert, Card, Col, Row, Statistic } from "antd";
+import { Alert, Card, Col, Row, Skeleton, Statistic } from "antd";
 import type { MyDocumentsByStatusStats } from "../shared/api";
 
 const STATS_ORDER: { key: keyof MyDocumentsByStatusStats["byStatus"]; label: string }[] = [
@@ -23,7 +23,11 @@ export function MyDocumentsStatusSummary({ stats, loading, isError }: Props) {
   }
 
   if (loading && !stats) {
-    return <Card size="small" loading title="Сводка по моим документам" style={{ marginBottom: 16 }} />;
+    return (
+      <Card size="small" title="Сводка по моим документам" style={{ marginBottom: 16 }}>
+        <Skeleton active paragraph={{ rows: 1 }} />
+      </Card>
+    );
   }
 
   if (!stats) return null;
