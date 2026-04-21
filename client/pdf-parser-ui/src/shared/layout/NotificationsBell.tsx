@@ -76,12 +76,21 @@ export function NotificationsBell() {
       <Badge count={unread > 0 ? unread : 0} size="small" offset={[-2, 2]}>
         <Button
           type="text"
+          className="workspace-notifications-trigger"
           aria-label="Уведомления"
           icon={<BellOutlined style={{ fontSize: 18 }} />}
           onClick={handleOpen}
         />
       </Badge>
-      <Drawer title="Уведомления" placement="right" size={380} onClose={handleClose} open={open} destroyOnHidden={false}>
+      <Drawer
+        title="Уведомления"
+        placement="right"
+        size={380}
+        onClose={handleClose}
+        open={open}
+        destroyOnHidden={false}
+        className="notifications-drawer"
+      >
         {isListLoading || (open && isListFetching && !listData) ? (
           <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
             <Spin />

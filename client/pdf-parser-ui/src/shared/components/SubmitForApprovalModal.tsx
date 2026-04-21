@@ -124,7 +124,7 @@ export function SubmitForApprovalModal(props: SubmitForApprovalModalProps) {
     selectedRoute?.steps?.map((s, i) => `${i + 1}. ${s.assigneeSummary ?? "—"}`) ?? [];
 
   return (
-    <Modal title={`Отправка на согласование — ${documentType}`} open={open} onCancel={onClose} footer={null} destroyOnClose width={640}>
+    <Modal title={`Отправка на согласование — ${documentType}`} open={open} onCancel={onClose} footer={null} destroyOnHidden width={640}>
       {phase === "configure" ? (
         <>
           {matchedRoutes.length > 0 ? (
@@ -179,7 +179,7 @@ export function SubmitForApprovalModal(props: SubmitForApprovalModalProps) {
                             />
                           </Form.Item>
                           {fields.length > 1 ? (
-                            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                            <Button type="text" danger icon={<DeleteOutlined />} aria-label={`Удалить шаг ${index + 1}`} onClick={() => remove(field.name)} />
                           ) : null}
                         </Space>
                       ))}

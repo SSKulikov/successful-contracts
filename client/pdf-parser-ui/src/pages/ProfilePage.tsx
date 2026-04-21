@@ -2,7 +2,7 @@ import { LockOutlined, MailOutlined, UserOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Avatar, Button, Card, Form, Input, Space, Typography, Upload, message } from "antd";
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AUTH_TOKEN_STORAGE_KEY,
   AUTH_USER_STORAGE_KEY,
@@ -14,7 +14,9 @@ import {
   getStoredUserProfile,
   profileApi
 } from "../shared/api";
+import { PageHeader } from "../shared/components/PageHeader";
 import { getApiErrorMessage } from "../shared/utils/api-error";
+import { ApiErrorState } from "../shared/components/ApiErrorState";
 
 const PASSWORD_GATE_HINT = "Сначала смените пароль.";
 
@@ -28,13 +30,14 @@ function scrollToPasswordSection() {
 }
 
 export function ProfilePage() {
+  const navigate = useNavigate();
   const [profileForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const storedUserRaw = localStorage.getItem(AUTH_USER_STORAGE_KEY);
   const storedUser = storedUserRaw ? (JSON.parse(storedUserRaw) as UserProfile | null) : null;
-  const { data: profile, isLoading } = useQuery({
+  const { data: profile, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["my-profile"],
     queryFn: profileApi.getMyProfile,
     enabled: Boolean(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY))
@@ -134,8 +137,17 @@ export function ProfilePage() {
   };
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Typography.Title level={3}>Профиль</Typography.Title>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }} className="page-shell">
+      <PageHeader title="Профиль" subtitle="Управляйте личными данными, фото и паролем аккаунта." />
+      {isError ? (
+        <ApiErrorState
+          title="Не удалось загрузить профиль"
+          description={getApiErrorMessage(error)}
+          onRetry={() => void refetch()}
+          fallbackText="Перейти к документам"
+          onFallback={() => navigate("/my-documents")}
+        />
+      ) : null}
 
       {currentProfile?.mustChangePassword ? (
         <Alert

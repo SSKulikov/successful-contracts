@@ -1,4 +1,5 @@
-import { Button, Layout, Menu, message } from "antd";
+import { DesktopOutlined, LogoutOutlined, MoonOutlined, SunOutlined, UserOutlined } from "@ant-design/icons";
+import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, message, Space, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -24,19 +25,41 @@ export function AppLayout() {
 
   const platformMenuItems = useMemo(
     () => [
-      { key: "/profile", label: "Профиль" },
-      { key: "/admin-panel", label: "Админ панель" },
-      { key: "/my-documents", label: "Мои документы" },
-      { key: "/my-approvals", label: "В работе" }
+      {
+        type: "group" as const,
+        label: "Документы",
+        children: [
+          { key: "/my-documents", label: "Мои документы" },
+          { key: "/my-approvals", label: "В работе" }
+        ]
+      },
+      {
+        type: "group" as const,
+        label: "Управление",
+        children: [
+          { key: "/profile", label: "Профиль" },
+          { key: "/admin-panel", label: "Админ панель" }
+        ]
+      }
     ],
     []
   );
 
   const tenantMenuItems = useMemo(
     () => [
-      { key: "/profile", label: "Профиль" },
-      { key: "/my-documents", label: "Мои документы" },
-      { key: "/my-approvals", label: "В работе" }
+      {
+        type: "group" as const,
+        label: "Документы",
+        children: [
+          { key: "/my-documents", label: "Мои документы" },
+          { key: "/my-approvals", label: "В работе" }
+        ]
+      },
+      {
+        type: "group" as const,
+        label: "Профиль",
+        children: [{ key: "/profile", label: "Профиль" }]
+      }
     ],
     []
   );
@@ -45,8 +68,24 @@ export function AppLayout() {
   const mustChangePassword = Boolean(user?.mustChangePassword);
   const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
   const gatedMenuItems = mustChangePassword
-    ? menuItems.map((item) => (item.key === "/profile" ? item : { ...item, disabled: true }))
+    ? menuItems.map((item) => ({
+        ...item,
+        children: item.children?.map((child) =>
+          child.key === "/profile" ? child : { ...child, disabled: true }
+        )
+      }))
     : menuItems;
+
+  const breadcrumbMap: Record<string, string> = {
+    "/my-documents": "Мои документы",
+    "/documents": "Карточка документа",
+    "/my-approvals": "В работе",
+    "/profile": "Профиль",
+    "/admin-panel": "Админ панель",
+    "/workspace": "Рабочее место"
+  };
+  const breadcrumbLabel =
+    Object.entries(breadcrumbMap).find(([path]) => location.pathname.startsWith(path))?.[1] ?? "Раздел";
 
   useEffect(() => {
     const syncProfileState = () => setProfileVersion((v) => v + 1);
@@ -72,6 +111,13 @@ export function AppLayout() {
     navigate("/");
   };
 
+  const initials = user?.fullName
+    ?.split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "U";
+
   return (
     <Layout style={{ minHeight: "100vh" }}>
       {showHeader && (
@@ -92,15 +138,10 @@ export function AppLayout() {
         {!hideSidebar && (
           <Sider width={280} className="app-sider">
             <div className="app-sider-inner">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  alignItems: "center",
-                  padding: "8px 12px 4px"
-                }}
-              >
-                <NotificationsBell />
+              <div className="app-sider-brand">
+                <Link to="/" className="brand-link">
+                  DocFlow
+                </Link>
               </div>
               <Menu
                 mode="inline"
@@ -125,6 +166,72 @@ export function AppLayout() {
           </Sider>
         )}
         <Content className={hideSidebar ? "app-content" : "app-content app-content-with-sider"}>
+          {!hideSidebar ? (
+            <header className="workspace-header">
+              <Breadcrumb
+                items={[
+                  { title: "DocFlow" },
+                  { title: breadcrumbLabel }
+                ]}
+                className="workspace-breadcrumb"
+              />
+              <Space size={12}>
+                <NotificationsBell />
+                <Dropdown
+                  placement="bottomRight"
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "profile",
+                        icon: <UserOutlined />,
+                        label: "Профиль",
+                        onClick: () => navigate("/profile")
+                      },
+                      { type: "divider" },
+                      {
+                        key: "theme-light",
+                        icon: <SunOutlined />,
+                        label: "Светлая тема",
+                        disabled: true
+                      },
+                      {
+                        key: "theme-dark",
+                        icon: <MoonOutlined />,
+                        label: "Тёмная тема",
+                        disabled: true
+                      },
+                      {
+                        key: "theme-system",
+                        icon: <DesktopOutlined />,
+                        label: "Системная тема",
+                        disabled: true
+                      },
+                      { type: "divider" },
+                      {
+                        key: "logout",
+                        icon: <LogoutOutlined />,
+                        label: "Выйти",
+                        danger: true,
+                        onClick: handleLogout
+                      }
+                    ]
+                  }}
+                >
+                  <Button type="text" className="workspace-user-trigger" aria-label="Меню пользователя" aria-haspopup="menu">
+                    <Space size={10}>
+                      <Typography.Text className="workspace-user-name" ellipsis>
+                        {user?.fullName ?? "Пользователь"}
+                      </Typography.Text>
+                      <Avatar size={34} className="workspace-user-avatar">
+                        {initials}
+                      </Avatar>
+                    </Space>
+                  </Button>
+                </Dropdown>
+              </Space>
+            </header>
+          ) : null}
           {/* Зависимость от версии профиля, чтобы моментально применять гейт после смены пароля. */}
           <div data-profile-version={profileVersion} style={{ display: "none" }} />
           <Outlet />

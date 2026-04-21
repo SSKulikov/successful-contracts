@@ -17,7 +17,11 @@ export function AuthPage() {
   const [loginForm] = Form.useForm();
 
   const handleLogin = async () => {
-    await loginForm.validateFields();
+    try {
+      await loginForm.validateFields();
+    } catch {
+      return;
+    }
 
     const login = loginForm.getFieldValue("login");
     const password = loginForm.getFieldValue("password");
@@ -59,25 +63,25 @@ export function AuthPage() {
   return (
     <div className="auth-page">
       <Card className="auth-card">
-      <Typography.Title level={3}>Вход в систему</Typography.Title>
-      <Form form={loginForm} layout="vertical">
-        <Form.Item
-          label="Email или логин"
-          name="login"
-          rules={[{ required: true, message: "Введите email или логин" }]}
-        >
-          <Input placeholder="admin или user@company.ru" />
-        </Form.Item>
-        <Form.Item label="Пароль" name="password" rules={[{ required: true, message: "Введите пароль" }]}>
-          <Input.Password placeholder="Введите пароль" />
-        </Form.Item>
-        <Button type="primary" block onClick={handleLogin}>
-          Войти
-        </Button>
-        <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-          Демо-админ: <code>admin</code> / <code>111</code>. Сотрудник: email и пароль от администратора компании.
-        </Typography.Paragraph>
-      </Form>
+        <Typography.Title level={3}>Вход в систему</Typography.Title>
+        <Form form={loginForm} layout="vertical">
+          <Form.Item
+            label="Email или логин"
+            name="login"
+            rules={[{ required: true, message: "Введите email или логин" }]}
+          >
+            <Input placeholder="admin или user@company.ru" />
+          </Form.Item>
+          <Form.Item label="Пароль" name="password" rules={[{ required: true, message: "Введите пароль" }]}>
+            <Input.Password placeholder="Введите пароль" />
+          </Form.Item>
+          <Button type="primary" block onClick={handleLogin}>
+            Войти
+          </Button>
+          <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+            Демо-админ: <code>admin</code> / <code>111</code>. Сотрудник: email и пароль от администратора компании.
+          </Typography.Paragraph>
+        </Form>
       </Card>
     </div>
   );

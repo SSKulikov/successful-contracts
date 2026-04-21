@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Steps, Tag, Timeline, Typography, message } from "antd";
-import { useState } from "react";
+import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Timeline, Typography, message } from "antd";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
@@ -19,15 +19,10 @@ import {
   isPlatformAdminUser,
   type SubmitForApprovalPayload
 } from "../shared/api";
-
-function renderStatusTag(status: DocumentDetails["status"], size: "default" | "large" = "default") {
-  const className = size === "large" ? "doc-detail-status doc-detail-status--lg" : "doc-detail-status";
-  if (status === "Загружен") return <Tag className={className}>{status}</Tag>;
-  if (status === "На согласовании") return <Tag className={className} color="processing">{status}</Tag>;
-  if (status === "На доработке") return <Tag className={className} color="warning">{status}</Tag>;
-  if (status === "Отклонен") return <Tag className={className} color="error">{status}</Tag>;
-  return <Tag className={className} color="success">{status}</Tag>;
-}
+import { StatusTag } from "../shared/components/StatusTag";
+import { formatDateTime, formatMoney } from "../shared/utils/format";
+import { confirmCommentAction, confirmDangerAction } from "../shared/utils/confirm-actions";
+import { ApiErrorState } from "../shared/components/ApiErrorState";
 
 function workflowStepIndex(status: DocumentDetails["status"] | undefined): number {
   if (!status) return 0;
@@ -66,13 +61,14 @@ export function DocumentDetailsPage() {
   const [editForm] = Form.useForm();
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const editDocumentButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
 
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["document-details", id],
     queryFn: () => documentsApi.openDocument(id),
     enabled: Boolean(id)
@@ -188,26 +184,9 @@ export function DocumentDetailsPage() {
 
   const handleRevise = () => {
     if (!data?.activeTaskId) return;
-    let comment = "";
-    Modal.confirm({
+    confirmCommentAction({
       title: "Отправить документ на доработку",
-      content: (
-        <Input.TextArea
-          autoSize={{ minRows: 3, maxRows: 6 }}
-          placeholder="Комментарий обязателен"
-          onChange={(event) => {
-            comment = event.target.value;
-          }}
-        />
-      ),
-      onOk: async () => {
-        const value = comment.trim();
-        if (!value) {
-          message.error("Комментарий обязателен");
-          throw new Error("Комментарий обязателен");
-        }
-        await reviseMutation.mutateAsync({ taskId: data.activeTaskId!, comment: value });
-      }
+      onSubmit: (comment) => reviseMutation.mutateAsync({ taskId: data.activeTaskId!, comment })
     });
   };
 
@@ -242,6 +221,11 @@ export function DocumentDetailsPage() {
     await updateDocumentMutation.mutateAsync(values);
   };
 
+  useEffect(() => {
+    if (editModalOpen) return;
+    editDocumentButtonRef.current?.focus();
+  }, [editModalOpen]);
+
   const handleSubmitForApproval = async (result: SubmitForApprovalModalResult) => {
     if (!id) return;
     if (result.kind === "route") {
@@ -253,19 +237,54 @@ export function DocumentDetailsPage() {
   };
 
   const fields = data?.fields;
+  const actionPrimary = canSubmit || canResubmit || canApproveInCard;
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }} className="page-shell">
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/my-documents")}>
           Назад к документам
         </Button>
+        <Button onClick={() => navigate("/my-approvals")}>К задачам согласования</Button>
       </Space>
 
       <MockApiBanner />
       {isError ? (
-        <Alert type="error" showIcon message="Не удалось загрузить карточку" description={getApiErrorMessage(error)} />
+        <ApiErrorState
+          title="Не удалось загрузить карточку"
+          description={getApiErrorMessage(error)}
+          onRetry={() => void refetch()}
+          fallbackText="Вернуться к документам"
+          onFallback={() => navigate("/my-documents")}
+        />
       ) : null}
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} sm={12} md={6}>
+          <Card size="small" className="doc-kpi-card">
+            <Typography.Text type="secondary">Статус</Typography.Text>
+            <div>{data ? <StatusTag status={data.status} /> : "—"}</div>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card size="small" className="doc-kpi-card">
+            <Typography.Text type="secondary">Этап</Typography.Text>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>{data?.currentStep ?? "—"}</Typography.Paragraph>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card size="small" className="doc-kpi-card">
+            <Typography.Text type="secondary">Инициатор</Typography.Text>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>{data?.initiator ?? "—"}</Typography.Paragraph>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card size="small" className="doc-kpi-card">
+            <Typography.Text type="secondary">Создан</Typography.Text>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>{formatDateTime(data?.createdAt)}</Typography.Paragraph>
+          </Card>
+        </Col>
+      </Row>
 
       <Card className="doc-detail-card" loading={isLoading && !isError}>
         <div className="doc-detail-hero">
@@ -289,7 +308,7 @@ export function DocumentDetailsPage() {
                   </Typography.Paragraph>
                 ) : null}
               </div>
-              {data ? renderStatusTag(data.status, "large") : null}
+              {data ? <StatusTag status={data.status} size="large" /> : null}
             </Space>
             <Steps
               size="small"
@@ -307,7 +326,7 @@ export function DocumentDetailsPage() {
         </Typography.Text>
         <Space wrap style={{ marginBottom: 8 }}>
           {data?.canEditDocumentFields ? (
-            <Button disabled={actionInProgress} onClick={openEditModal}>
+            <Button ref={editDocumentButtonRef} disabled={actionInProgress} onClick={openEditModal}>
               Редактировать
             </Button>
           ) : null}
@@ -336,6 +355,7 @@ export function DocumentDetailsPage() {
           ) : null}
           {canWithdraw ? (
             <Button
+              type={actionPrimary ? "default" : "primary"}
               disabled={actionInProgress}
               onClick={() =>
                 Modal.confirm({
@@ -355,12 +375,10 @@ export function DocumentDetailsPage() {
               danger
               disabled={actionInProgress}
               onClick={() =>
-                Modal.confirm({
+                confirmDangerAction({
                   title: "Удалить документ?",
                   content: "Документ будет удален без возможности восстановления.",
                   okText: "Удалить",
-                  okButtonProps: { danger: true },
-                  cancelText: "Отмена",
                   onOk: () => deleteMutation.mutateAsync(id)
                 })
               }
@@ -382,7 +400,7 @@ export function DocumentDetailsPage() {
           <Descriptions.Item label="Тип">{data?.type ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Номер">{fields?.number ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Дата">{fields?.date ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Сумма">{data?.amount ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label="Сумма">{formatMoney(data?.amount)}</Descriptions.Item>
           <Descriptions.Item label="Предмет / основание" span={2}>
             {fields?.subject ?? "—"}
           </Descriptions.Item>
@@ -413,8 +431,8 @@ export function DocumentDetailsPage() {
             <Descriptions.Item label="Компания (ID)">{data.companyId}</Descriptions.Item>
           ) : null}
           <Descriptions.Item label="Инициатор (контрагент в списке)">{data?.initiator ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Создан">{data?.createdAt ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Обновлен">{data?.updatedAt ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label="Создан">{formatDateTime(data?.createdAt)}</Descriptions.Item>
+          <Descriptions.Item label="Обновлен">{formatDateTime(data?.updatedAt)}</Descriptions.Item>
         </Descriptions>
       </Card>
 

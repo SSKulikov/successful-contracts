@@ -1,17 +1,24 @@
-import { CheckOutlined, CloseOutlined, UndoOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Empty, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Card, Dropdown, Grid, Input, Segmented, Select, Space, Table, Typography, message } from "antd";
+import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ResizeCallbackData } from "react-resizable";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
+import { AppEmptyState } from "../shared/components/AppEmptyState";
+import { PageHeader } from "../shared/components/PageHeader";
+import { ResizableHeaderCell } from "../shared/components/ResizableHeaderCell";
+import { StatusLegend } from "../shared/components/StatusLegend";
+import { PriorityTag } from "../shared/components/StatusTag";
+import { formatDateTime, formatMoney } from "../shared/utils/format";
 import { getApiErrorMessage } from "../shared/utils/api-error";
-import { ApprovalRow, approvalsApi } from "../shared/api";
+import { ApiErrorState } from "../shared/components/ApiErrorState";
+import { confirmCommentAction } from "../shared/utils/confirm-actions";
+import { ApprovalRow, approvalsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
-
-function renderPriority(priority: ApprovalRow["priority"]) {
-  return priority === "Срочно" ? <Tag color="red">{priority}</Tag> : <Tag>{priority}</Tag>;
-}
 
 function formatWaitingDays(days: number): string {
   if (days <= 0) return "Сегодня";
@@ -23,22 +30,54 @@ function formatWaitingDays(days: number): string {
   return `${n} дней`;
 }
 
-function formatReceivedAt(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
 export function MyApprovalsPage() {
+  const COLUMN_WIDTHS_STORAGE_KEY = "my-approvals-column-widths";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
+  const [tableSize, setTableSize] = useState<"small" | "middle">("small");
+  const [tableVersion, setTableVersion] = useState(0);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    id: 110,
+    type: 130,
+    title: 240,
+    initiator: 190,
+    amount: 130,
+    waitingDays: 130,
+    currentStep: 170,
+    receivedAt: 160,
+    priority: 130,
+    actions: 360
+  });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
+  const me = getStoredUserProfile();
+  const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
 
-  const { data, isLoading, isError, error } = useQuery({
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, number>;
+      setColumnWidths((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      /* ignore parse errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [columnWidths]);
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["my-approvals", { search, typeFilter, page, pageSize }],
     queryFn: () =>
       approvalsApi.listMyApprovals({
@@ -91,65 +130,45 @@ export function MyApprovalsPage() {
   const handleApprove = async (row: ApprovalRow) =>
     approveMutation.mutateAsync({ approvalId: row.id, documentId: row.documentId });
   const handleRevision = async (row: ApprovalRow) => {
-    let comment = "";
-    Modal.confirm({
+    confirmCommentAction({
       title: `Отправить ${row.title} на доработку`,
-      content: (
-        <Input.TextArea
-          autoSize={{ minRows: 3, maxRows: 6 }}
-          placeholder="Комментарий обязателен"
-          onChange={(event) => {
-            comment = event.target.value;
-          }}
-        />
-      ),
-      onOk: async () => {
-        const value = comment.trim();
-        if (!value) {
-          message.error("Комментарий обязателен");
-          throw new Error("Комментарий обязателен");
-        }
-        await returnMutation.mutateAsync({ approvalId: row.id, comment: value, documentId: row.documentId });
-      }
+      onSubmit: (comment) => returnMutation.mutateAsync({ approvalId: row.id, comment, documentId: row.documentId })
     });
   };
   const handleReject = async (row: ApprovalRow) =>
     rejectMutation.mutateAsync({ approvalId: row.id, documentId: row.documentId });
+  const sortedApprovals = useMemo(() => {
+    if (!search.trim()) return data?.items ?? [];
+    return [...(data?.items ?? [])].sort((left, right) =>
+      left.id.localeCompare(right.id, "ru", { numeric: true, sensitivity: "base" })
+    );
+  }, [data?.items, search]);
+  const resetColumnWidths = () => {
+    const defaults = {
+      id: 110,
+      type: 130,
+      title: 240,
+      initiator: 190,
+      amount: 130,
+      waitingDays: 130,
+      currentStep: 170,
+      receivedAt: 160,
+      priority: 130,
+      actions: 360
+    };
+    setColumnWidths(defaults);
+    localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(defaults));
+  };
+  const resetFilters = () => {
+    setSearch("");
+    setTypeFilter(undefined);
+    setPage(1);
+  };
 
-  const columns: ColumnsType<ApprovalRow> = [
-    { title: "ID", dataIndex: "id", key: "id", width: 110 },
-    { title: "Тип", dataIndex: "type", key: "type", width: 140 },
-    { title: "Документ", dataIndex: "title", key: "title" },
-    { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170 },
-    { title: "Сумма", dataIndex: "amount", key: "amount", width: 130 },
-    {
-      title: "В очереди",
-      dataIndex: "waitingDays",
-      key: "waitingDays",
-      width: 120,
-      render: (days: number) => formatWaitingDays(days)
-    },
-    { title: "Этап", dataIndex: "currentStep", key: "currentStep", width: 130 },
-    {
-      title: "Получен",
-      dataIndex: "receivedAt",
-      key: "receivedAt",
-      width: 160,
-      render: (value: string) => formatReceivedAt(value)
-    },
-    {
-      title: "Приоритет",
-      dataIndex: "priority",
-      key: "priority",
-      width: 120,
-      render: (value: ApprovalRow["priority"]) => renderPriority(value)
-    },
-    {
-      title: "Действия",
-      key: "actions",
-      width: 360,
-      render: (_, row) => (
-        <Space>
+  const renderActions = (row: ApprovalRow) => {
+    if (!isMobile) {
+      return (
+        <Space wrap size={[4, 4]} className="table-actions-cell">
           <Button type="link" disabled={actionInProgress} onClick={() => navigate(`/documents/${row.documentId ?? row.id}`)}>
             Открыть
           </Button>
@@ -173,22 +192,161 @@ export function MyApprovalsPage() {
             </>
           ) : null}
         </Space>
-      )
+      );
     }
-  ];
+
+    const items: MenuProps["items"] = [
+      {
+        key: "open",
+        label: "Открыть",
+        onClick: () => navigate(`/documents/${row.documentId ?? row.id}`)
+      }
+    ];
+    if (row.canTakeDecision !== false) {
+      items.push(
+        {
+          key: "approve",
+          label: "Согласовать",
+          disabled: actionInProgress,
+          onClick: () => void handleApprove(row)
+        },
+        {
+          key: "revise",
+          label: "На доработку",
+          disabled: actionInProgress,
+          onClick: () => void handleRevision(row)
+        },
+        {
+          key: "reject",
+          label: "Отклонить",
+          danger: true,
+          disabled: actionInProgress,
+          onClick: () => void handleReject(row)
+        }
+      );
+    }
+
+    return (
+      <Dropdown menu={{ items }} trigger={["click"]} placement="bottomRight">
+        <Button icon={<MoreOutlined />} aria-label={`Действия по задаче ${row.id}`} />
+      </Dropdown>
+    );
+  };
+
+  const handleResize =
+    (key: string) =>
+    (_event: SyntheticEvent<Element>, { size }: ResizeCallbackData) => {
+      const minWidth = key === "actions" ? 220 : 90;
+      setColumnWidths((prev) => ({ ...prev, [key]: Math.max(minWidth, Math.round(size.width)) }));
+    };
+
+  const columns: ColumnsType<ApprovalRow> = [
+    { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id },
+    {
+      title: "Тип",
+      dataIndex: "type",
+      key: "type",
+      width: columnWidths.type,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
+    },
+    {
+      title: "Документ",
+      dataIndex: "title",
+      key: "title",
+      width: columnWidths.title,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
+    },
+    {
+      title: "Инициатор",
+      dataIndex: "initiator",
+      key: "initiator",
+      width: columnWidths.initiator,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
+    },
+    { title: "Сумма", dataIndex: "amount", key: "amount", width: columnWidths.amount, render: (value: string) => formatMoney(value) },
+    {
+      title: "В очереди",
+      dataIndex: "waitingDays",
+      key: "waitingDays",
+      width: columnWidths.waitingDays,
+      render: (days: number) => formatWaitingDays(days)
+    },
+    {
+      title: "Этап",
+      dataIndex: "currentStep",
+      key: "currentStep",
+      width: columnWidths.currentStep,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>
+    },
+    {
+      title: "Получен",
+      dataIndex: "receivedAt",
+      key: "receivedAt",
+      width: columnWidths.receivedAt,
+      render: (value: string) => formatDateTime(value)
+    },
+    {
+      title: "Приоритет",
+      dataIndex: "priority",
+      key: "priority",
+      width: columnWidths.priority,
+      render: (value: ApprovalRow["priority"]) => <PriorityTag priority={value} />
+    },
+    {
+      title: "Действия",
+      key: "actions",
+      width: isMobile ? 88 : columnWidths.actions,
+      render: (_: unknown, row: ApprovalRow) => renderActions(row)
+    }
+  ].map((column) => ({
+    ...column,
+    onHeaderCell: () => ({
+      width: Number(column.width),
+      onResize: handleResize(String(column.key))
+    })
+  }));
 
   return (
-    <div>
-      <Typography.Title level={3}>В работе</Typography.Title>
+    <div className="page-shell">
+      <PageHeader
+        title="В работе"
+        subtitle="Документы, где от вас ожидается решение по этапу согласования."
+        actions={
+          <Space wrap>
+            <Segmented
+              size="small"
+              value={tableSize}
+              onChange={(value) => setTableSize(value as "small" | "middle")}
+              options={[
+                { label: "Компактно", value: "small" },
+                { label: "Стандарт", value: "middle" }
+              ]}
+            />
+            <Button onClick={resetColumnWidths}>Сбросить ширины</Button>
+            <Button onClick={() => setTableVersion((v) => v + 1)}>Сбросить сортировку</Button>
+          </Space>
+        }
+      />
 
       <MockApiBanner />
+      <StatusLegend />
       {isError ? (
-        <Alert type="error" showIcon message="Не удалось загрузить задачи" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} />
+        <ApiErrorState
+          title="Не удалось загрузить задачи"
+          description={getApiErrorMessage(error)}
+          onRetry={() => void refetch()}
+          fallbackText="Перейти к документам"
+          onFallback={() => navigate("/my-documents")}
+        />
       ) : null}
 
       <Card>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Space wrap>
+          <Space wrap className="toolbar-row">
             <Input.Search
               placeholder="Поиск по ID, документу или инициатору"
               allowClear
@@ -210,20 +368,40 @@ export function MyApprovalsPage() {
               }}
               options={DOCUMENT_TYPE_SELECT_OPTIONS}
             />
+            <Button onClick={resetFilters}>Сбросить фильтры</Button>
           </Space>
 
           <Table
-            className="my-approvals-table"
+            key={tableVersion}
+            className="app-table my-approvals-table"
             rowKey="id"
+            components={{
+              header: {
+                cell: ResizableHeaderCell
+              }
+            }}
             columns={columns}
-            dataSource={data?.items ?? []}
+            dataSource={sortedApprovals}
             rowClassName={(record) =>
               record.canTakeDecision === false ? "my-approvals-row--view-only" : "my-approvals-row--actionable"
             }
-            scroll={{ x: 1100 }}
+            tableLayout="fixed"
+            scroll={{ x: 1450 }}
             loading={isLoading || actionInProgress}
+            size={tableSize}
             locale={{
-              emptyText: <Empty description="Нет задач" />
+              emptyText: (
+                <AppEmptyState
+                  description="Нет задач на согласование"
+                  extra={
+                    <Space>
+                      <Button onClick={resetFilters}>Сбросить фильтры</Button>
+                      <Button onClick={() => navigate("/my-documents")}>Перейти к документам</Button>
+                      {isPlatformAdmin ? <Button onClick={() => navigate("/admin-panel")}>Перейти в админ-панель</Button> : null}
+                    </Space>
+                  }
+                />
+              )
             }}
             pagination={{
               current: data?.meta.page ?? page,

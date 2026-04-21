@@ -1,11 +1,22 @@
-import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
+import { DownloadOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, DatePicker, Dropdown, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { ResizeCallbackData } from "react-resizable";
+import type { MenuProps } from "antd";
 import dayjs from "dayjs";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SyntheticEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
+import { AppEmptyState } from "../shared/components/AppEmptyState";
+import { PageHeader } from "../shared/components/PageHeader";
+import { StatusTag } from "../shared/components/StatusTag";
+import { StatusLegend } from "../shared/components/StatusLegend";
+import { ResizableHeaderCell } from "../shared/components/ResizableHeaderCell";
+import { formatDateTime, formatMoney } from "../shared/utils/format";
+import { confirmDangerAction } from "../shared/utils/confirm-actions";
+import { ApiErrorState } from "../shared/components/ApiErrorState";
 import {
   SubmitForApprovalModal,
   type SubmitForApprovalModalResult
@@ -25,19 +36,15 @@ import {
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 import { MyDocumentsStatusSummary } from "./MyDocumentsStatusSummary";
 
-function renderStatusTag(status: DocumentRow["status"]) {
-  if (status === "Загружен") return <Tag>{status}</Tag>;
-  if (status === "На согласовании") return <Tag color="processing">{status}</Tag>;
-  if (status === "На доработке") return <Tag color="warning">{status}</Tag>;
-  if (status === "Отклонен") return <Tag color="error">{status}</Tag>;
-  return <Tag color="success">{status}</Tag>;
-}
-
 export function MyDocumentsPage() {
+  const COLUMN_WIDTHS_STORAGE_KEY = "my-documents-column-widths";
   const navigate = useNavigate();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const createDocumentButtonRef = useRef<HTMLButtonElement | null>(null);
   const [form] = Form.useForm<DocumentFormPayload>();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -50,9 +57,41 @@ export function MyDocumentsPage() {
   const [isParsingFile, setIsParsingFile] = useState(false);
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
   const [submitDocumentId, setSubmitDocumentId] = useState<string | null>(null);
+  const [tableSize, setTableSize] = useState<"small" | "middle">("small");
+  const [tableVersion, setTableVersion] = useState(0);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    id: 110,
+    type: 130,
+    title: 240,
+    initiator: 190,
+    amount: 140,
+    createdAt: 165,
+    status: 155,
+    actions: 360
+  });
 
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
+  const isEmployee = Boolean(me && !isPlatformAdminUser(me));
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, number>;
+      setColumnWidths((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      /* ignore parse errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [columnWidths]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -60,6 +99,11 @@ export function MyDocumentsPage() {
     }, 350);
     return () => window.clearTimeout(timeoutId);
   }, [search]);
+
+  useEffect(() => {
+    if (isModalOpen) return;
+    createDocumentButtonRef.current?.focus();
+  }, [isModalOpen]);
 
   const { data: companies = [] } = useQuery({
     queryKey: ["admin", "companies"],
@@ -69,7 +113,7 @@ export function MyDocumentsPage() {
 
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
 
-  const { data = [], isLoading, isError, error } = useQuery({
+  const { data = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ["my-documents", { search: debouncedSearch, statusFilter, typeFilter, dateFrom, dateTo }],
     queryFn: () =>
       documentsApi.listMyDocuments({
@@ -219,10 +263,30 @@ export function MyDocumentsPage() {
     setDateFrom(undefined);
     setDateTo(undefined);
   };
+  const resetColumnWidths = () => {
+    const defaults = {
+      id: 110,
+      type: 130,
+      title: 240,
+      initiator: 190,
+      amount: 140,
+      createdAt: 165,
+      status: 155,
+      actions: 360
+    };
+    setColumnWidths(defaults);
+    localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(defaults));
+  };
 
   const hasActiveListFilters = Boolean(
     search.trim() || statusFilter || typeFilter || dateFrom || dateTo
   );
+  const sortedData = useMemo(() => {
+    if (!search.trim()) return data;
+    return [...data].sort((left, right) =>
+      left.id.localeCompare(right.id, "ru", { numeric: true, sensitivity: "base" })
+    );
+  }, [data, search]);
 
   const handlePickFile = () => {
     fileInputRef.current?.click();
@@ -328,114 +392,226 @@ export function MyDocumentsPage() {
   };
   const sortByDate = (a: string | undefined, b: string | undefined) => new Date(String(a ?? "")).getTime() - new Date(String(b ?? "")).getTime();
 
+  const handleResize =
+    (key: string) =>
+    (_event: SyntheticEvent<Element>, { size }: ResizeCallbackData) => {
+      const minWidth = key === "actions" ? 220 : 90;
+      setColumnWidths((prev) => ({ ...prev, [key]: Math.max(minWidth, Math.round(size.width)) }));
+    };
+
   const columns: ColumnsType<DocumentRow> = [
-    { title: "ID", dataIndex: "id", key: "id", width: 110, sorter: (a, b) => sortByText(a.id, b.id) },
+    { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id, sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.id, b.id) },
     {
       title: "Тип",
       dataIndex: "type",
       key: "type",
-      width: 150,
-      sorter: (a, b) => sortByText(a.type, b.type)
+      width: columnWidths.type,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.type, b.type)
     },
-    { title: "Название", dataIndex: "title", key: "title", sorter: (a, b) => sortByText(a.title, b.title) },
-    { title: "Инициатор", dataIndex: "initiator", key: "initiator", width: 170, sorter: (a, b) => sortByText(a.initiator, b.initiator) },
-    { title: "Сумма", dataIndex: "amount", key: "amount", width: 140, sorter: (a, b) => sortByAmount(a.amount, b.amount) },
+    {
+      title: "Название",
+      dataIndex: "title",
+      key: "title",
+      width: columnWidths.title,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.title, b.title)
+    },
+    {
+      title: "Инициатор",
+      dataIndex: "initiator",
+      key: "initiator",
+      width: columnWidths.initiator,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.initiator, b.initiator)
+    },
+    {
+      title: "Сумма",
+      dataIndex: "amount",
+      key: "amount",
+      width: columnWidths.amount,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByAmount(a.amount, b.amount),
+      render: (value: string) => formatMoney(value)
+    },
     {
       title: "Создан",
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 180,
-      sorter: (a, b) => sortByDate(a.createdAt, b.createdAt),
-      render: (value?: string) => (value ? new Date(value).toLocaleString("ru-RU") : "-")
+      width: columnWidths.createdAt,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByDate(a.createdAt, b.createdAt),
+      render: (value?: string) => formatDateTime(value)
     },
     {
       title: "Статус",
       dataIndex: "status",
       key: "status",
-      width: 150,
-      sorter: (a, b) => sortByText(a.status, b.status),
-      render: (value: DocumentRow["status"]) => renderStatusTag(value)
+      width: columnWidths.status,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.status, b.status),
+      render: (value: DocumentRow["status"]) => <StatusTag status={value} />
     },
     {
       title: "Действия",
       key: "actions",
-      width: 320,
-      render: (_, row) => (
-        <Space>
-          <Button type="link" onClick={() => navigate(`/documents/${row.id}`)}>
-            Открыть
-          </Button>
-          {row.status === "Загружен" || row.status === "На доработке" ? (
-            <>
-              <Button type="link" onClick={() => void openEditModal(row)}>
-                Редактировать
+      width: isMobile ? 88 : columnWidths.actions,
+      render: (_: unknown, row: DocumentRow) => {
+        const confirmDelete = () =>
+          confirmDangerAction({
+            title: "Удалить документ?",
+            content: "Документ будет удален без возможности восстановления.",
+            okText: "Удалить",
+            onOk: () => deleteMutation.mutateAsync(row.id)
+          });
+
+        const confirmWithdraw = () =>
+          Modal.confirm({
+            title: "Отозвать документ с согласования?",
+            content: "После отзыва документ вернется в статус 'Загружен'.",
+            okText: "Отозвать",
+            cancelText: "Отмена",
+            onOk: () => withdrawMutation.mutateAsync(row.id)
+          });
+
+        if (!isMobile) {
+          return (
+            <Space wrap size={[4, 4]} className="table-actions-cell">
+              <Button type="link" onClick={() => navigate(`/documents/${row.id}`)}>
+                Открыть
               </Button>
-              {row.status === "На доработке" ? (
+              {row.status === "Загружен" || row.status === "На доработке" ? (
+                <>
+                  <Button type="link" onClick={() => void openEditModal(row)}>
+                    Редактировать
+                  </Button>
+                  {row.status === "На доработке" ? (
+                    <Button
+                      type="link"
+                      loading={resubmitMutation.isPending && resubmitMutation.variables === row.id}
+                      onClick={() => resubmitMutation.mutate(row.id)}
+                    >
+                      Повторно отправить
+                    </Button>
+                  ) : (
+                    <Button type="link" loading={submitMutation.isPending} onClick={() => void openSubmitRouteModal(row.id)}>
+                      Отправить
+                    </Button>
+                  )}
+                  <Button
+                    type="link"
+                    danger
+                    loading={deleteMutation.isPending && deleteMutation.variables === row.id}
+                    onClick={confirmDelete}
+                  >
+                    Удалить
+                  </Button>
+                </>
+              ) : null}
+              {row.status === "На согласовании" ? (
                 <Button
                   type="link"
-                  loading={resubmitMutation.isPending && resubmitMutation.variables === row.id}
-                  onClick={() => resubmitMutation.mutate(row.id)}
+                  loading={withdrawMutation.isPending && withdrawMutation.variables === row.id}
+                  onClick={confirmWithdraw}
                 >
-                  Повторно отправить
+                  Отозвать
                 </Button>
-              ) : (
-                <Button type="link" loading={submitMutation.isPending} onClick={() => void openSubmitRouteModal(row.id)}>
-                  Отправить
-                </Button>
-              )}
-              <Button
-                type="link"
-                danger
-                loading={deleteMutation.isPending && deleteMutation.variables === row.id}
-                onClick={() =>
-                  Modal.confirm({
-                    title: "Удалить документ?",
-                    content: "Документ будет удален без возможности восстановления.",
-                    okText: "Удалить",
-                    okButtonProps: { danger: true },
-                    cancelText: "Отмена",
-                    onOk: () => deleteMutation.mutateAsync(row.id)
-                  })
+              ) : null}
+            </Space>
+          );
+        }
+
+        const items: MenuProps["items"] = [
+          { key: "open", label: "Открыть", onClick: () => navigate(`/documents/${row.id}`) }
+        ];
+        if (row.status === "Загружен" || row.status === "На доработке") {
+          items.push(
+            { key: "edit", label: "Редактировать", onClick: () => void openEditModal(row) },
+            row.status === "На доработке"
+              ? {
+                  key: "resubmit",
+                  label: "Повторно отправить",
+                  disabled: resubmitMutation.isPending,
+                  onClick: () => resubmitMutation.mutate(row.id)
                 }
-              >
-                Удалить
-              </Button>
-            </>
-          ) : null}
-          {row.status === "На согласовании" ? (
-            <Button
-              type="link"
-              loading={withdrawMutation.isPending && withdrawMutation.variables === row.id}
-              onClick={() =>
-                Modal.confirm({
-                  title: "Отозвать документ с согласования?",
-                  content: "После отзыва документ вернется в статус 'Загружен'.",
-                  okText: "Отозвать",
-                  cancelText: "Отмена",
-                  onOk: () => withdrawMutation.mutateAsync(row.id)
-                })
-              }
-            >
-              Отозвать
-            </Button>
-          ) : null}
-        </Space>
-      )
+              : {
+                  key: "submit",
+                  label: "Отправить",
+                  disabled: submitMutation.isPending,
+                  onClick: () => void openSubmitRouteModal(row.id)
+                },
+            {
+              key: "delete",
+              label: "Удалить",
+              danger: true,
+              disabled: deleteMutation.isPending,
+              onClick: confirmDelete
+            }
+          );
+        }
+        if (row.status === "На согласовании") {
+          items.push({
+            key: "withdraw",
+            label: "Отозвать",
+            disabled: withdrawMutation.isPending,
+            onClick: confirmWithdraw
+          });
+        }
+        return (
+          <Dropdown menu={{ items }} trigger={["click"]} placement="bottomRight">
+            <Button icon={<MoreOutlined />} aria-label={`Действия для документа ${row.id}`} />
+          </Dropdown>
+        );
+      }
     }
-  ];
+  ].map((column) => ({
+    ...column,
+    onHeaderCell: () => ({
+      width: Number(column.width),
+      onResize: handleResize(String(column.key))
+    })
+  }));
 
   return (
-    <div>
-      <Typography.Title level={3}>Мои документы</Typography.Title>
+    <div className="page-shell">
+      <PageHeader
+        title="Мои документы"
+        subtitle="Создавайте, фильтруйте и отправляйте документы на согласование."
+        actions={
+          <Space wrap>
+            <Segmented
+              size="small"
+              value={tableSize}
+              onChange={(value) => setTableSize(value as "small" | "middle")}
+              options={[
+                { label: "Компактно", value: "small" },
+                { label: "Стандарт", value: "middle" }
+              ]}
+            />
+            <Button onClick={resetColumnWidths}>Сбросить ширины</Button>
+            <Button onClick={() => setTableVersion((v) => v + 1)}>Сбросить сортировку</Button>
+            <Button ref={createDocumentButtonRef} type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              Создать документ
+            </Button>
+          </Space>
+        }
+      />
 
       <MyDocumentsStatusSummary stats={statusStats} loading={statusStatsLoading} isError={statusStatsError} />
+      <StatusLegend />
 
       <MockApiBanner />
-      {isError ? <Alert type="error" showIcon message="Не удалось загрузить список" description={getApiErrorMessage(error)} style={{ marginBottom: 16 }} /> : null}
+      {isError ? (
+        <ApiErrorState
+          title="Не удалось загрузить список"
+          description={getApiErrorMessage(error)}
+          onRetry={() => void refetch()}
+          fallbackText="Перейти в админ-панель"
+          onFallback={() => navigate("/admin-panel")}
+        />
+      ) : null}
 
       <Card>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Space wrap>
+          <Space wrap className="toolbar-row">
             <Input.Search
               placeholder="Поиск по номеру, контрагенту или ИНН"
               allowClear
@@ -494,9 +670,6 @@ export function MyDocumentsPage() {
                 Выгрузить в Excel
               </Button>
             </Tooltip>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              Создать документ
-            </Button>
           </Space>
 
           {hasActiveListFilters ? (
@@ -542,18 +715,35 @@ export function MyDocumentsPage() {
           ) : null}
 
           <Table
+            key={tableVersion}
+            className="app-table"
             rowKey="id"
+            components={{
+              header: {
+                cell: ResizableHeaderCell
+              }
+            }}
             columns={columns}
-            dataSource={data}
+            dataSource={sortedData}
             loading={isLoading}
+            size={tableSize}
+            tableLayout="fixed"
+            scroll={{ x: 1380 }}
             pagination={{ pageSize: 8 }}
             locale={{
               emptyText: (
-                <Empty description="Нет документов">
-                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-                    Создать документ
-                  </Button>
-                </Empty>
+                <AppEmptyState
+                  description="Нет документов"
+                  actionText="Создать первый документ"
+                  onAction={openCreateModal}
+                  extra={
+                    <Space>
+                      {hasActiveListFilters ? <Button onClick={resetFilters}>Сбросить фильтры</Button> : null}
+                      {isPlatformAdmin ? <Button onClick={() => navigate("/admin-panel")}>Перейти в админ-панель</Button> : null}
+                      {isEmployee ? <Button onClick={() => navigate("/my-approvals")}>Открыть мои согласования</Button> : null}
+                    </Space>
+                  }
+                />
               )
             }}
           />
