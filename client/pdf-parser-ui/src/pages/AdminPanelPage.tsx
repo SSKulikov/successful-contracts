@@ -976,7 +976,7 @@ export function AdminPanelPage() {
                         <Input value={generatedOneTimePassword} readOnly />
                       </Form.Item>
                     </Space>
-                    <Space style={{ marginBottom: 12 }}>
+                    <Space size={8} style={{ marginBottom: 12 }}>
                       <Button
                         onClick={() => {
                           const nextPassword = generateOneTimePassword();
@@ -986,20 +986,20 @@ export function AdminPanelPage() {
                       >
                         Сгенерировать заново
                       </Button>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        loading={createEmployeeMutation.isPending}
+                        onClick={handleCreateEmployee}
+                      >
+                        Создать сотрудника
+                      </Button>
                     </Space>
                     {lastIssuedPassword && (
                       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                         Пароль последнего созданного сотрудника: {lastIssuedPassword}
                       </Typography.Text>
                     )}
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      loading={createEmployeeMutation.isPending}
-                      onClick={handleCreateEmployee}
-                    >
-                      Создать сотрудника
-                    </Button>
                   </Form>
                 </Card>
 

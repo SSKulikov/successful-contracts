@@ -228,4 +228,47 @@
 
 ---
 
+## TODO: 3 дня оптимизации (по приоритету)
+
+### День 1 (P0): убрать критичные узкие места на сервере
+
+- [ ] Убрать вызовы `ensureApprovalDomainTables` и `ensureNotificationTables` из request-path; оставить управление схемой через миграции/инициализацию старта.
+  - Файлы: `server/pdf-parser/src/services/ApprovalDomainService/index.ts`, `server/pdf-parser/src/services/NotificationService.ts`, `server/pdf-parser/src/controllers/documents.controller.ts`, `server/pdf-parser/src/controllers/approvals.controller.ts`, `server/pdf-parser/src/controllers/notifications.controller.ts`, `server/pdf-parser/src/controllers/approval-routes.controller.ts`.
+- [ ] Заменить sync FS на async FS (`fs/promises`) в горячих местах.
+  - Файлы: `server/pdf-parser/src/services/PdfService/index.ts`, `server/pdf-parser/src/services/WordService/index.ts`, `server/pdf-parser/src/services/RegExService/index.ts`, `server/pdf-parser/src/services/RasterImageOcr.ts`, `server/pdf-parser/src/controllers/auth.controller.ts`, `server/pdf-parser/src/controllers/file.controller.ts`.
+- [ ] Прогнать серверные тесты: `npm test` в `server/pdf-parser`.
+- [ ] Выполнить smoke: логин, загрузка файла, парсинг, submit на согласование, просмотр уведомлений.
+- [ ] Сравнить latency до/после на небольшом параллельном прогоне (списки документов).
+
+### День 2 (P1): снизить лишние запросы и пиковую нагрузку
+
+- [ ] Добавить ограничение concurrency для OCR в `PdfService` (очередь/лимитер + таймауты).
+  - Файл: `server/pdf-parser/src/services/PdfService/index.ts`.
+- [ ] Удалить/скрыть за флагом лишние вызовы `parseRequisites` и `parsePaymentTerms`, если результат не используется.
+  - Файл: `server/pdf-parser/src/controllers/file.controller.ts`.
+- [ ] Добавить debounce 300-500ms для поиска в "Мои согласования".
+  - Файл: `client/pdf-parser-ui/src/pages/MyApprovalsPage.tsx`.
+- [ ] Сократить агрессивные `invalidateQueries` до минимально необходимых ключей.
+  - Файлы: `client/pdf-parser-ui/src/pages/MyDocumentsPage.tsx`, `client/pdf-parser-ui/src/pages/MyApprovalsPage.tsx`, `client/pdf-parser-ui/src/pages/DocumentDetailsPage.tsx`, `client/pdf-parser-ui/src/pages/AdminPanelPage.tsx`.
+- [ ] Прогнать e2e-критичные сценарии согласования/уведомлений.
+- [ ] Проверить в UI, что после debounce меньше сетевых запросов и нет регрессий в обновлении данных.
+
+### День 3 (P2): переиспользование компонентов и безопасная чистка
+
+- [ ] Вынести общую форму реквизитов документа в переиспользуемый компонент.
+  - Файлы: `client/pdf-parser-ui/src/pages/MyDocumentsPage.tsx`, `client/pdf-parser-ui/src/pages/DocumentDetailsPage.tsx`, `client/pdf-parser-ui/src/shared/*`.
+- [ ] Вынести общий toolbar для таблиц (поиск/фильтры/reset/size).
+  - Файлы: `client/pdf-parser-ui/src/pages/MyDocumentsPage.tsx`, `client/pdf-parser-ui/src/pages/MyApprovalsPage.tsx`, `client/pdf-parser-ui/src/shared/*`.
+- [ ] Удалить мертвый код/дубли после проверки импортов:
+  - [ ] `client/pdf-parser-ui/src/pages/ContractsPage.tsx` (если не планируется маршрут).
+  - [ ] `server/pdf-parser/src/services/RecognitionService/index.ts`.
+  - [ ] `server/pdf-parser/src/controllers/dataSaver.controller.ts`.
+  - [ ] `server/pdf-parser/src/prisma/index.js`.
+- [ ] Проверить удаление неиспользуемых клиентских зависимостей (`react-hook-form`, `@hookform/resolvers`, `zod`) и удалить из `client/pdf-parser-ui/package.json`, если не используются.
+- [ ] Подправить SQL-фильтры под индексы (избегать `DATE(column)` в WHERE, использовать диапазоны).
+  - Файл: `server/pdf-parser/src/controllers/documents.controller.ts`.
+- [ ] Прогнать: `npm run build` (клиент/сервер), `npm test` (клиент), smoke по ключевым вкладкам.
+
+---
+
 *Файл сгенерирован для согласования спринта; при смене состава дней обновите таблицу и DoD.*

@@ -1,6 +1,6 @@
 import { DownloadOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, DatePicker, Dropdown, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, DatePicker, Dropdown, Form, Grid, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ResizeCallbackData } from "react-resizable";
 import type { MenuProps } from "antd";
@@ -57,8 +57,6 @@ export function MyDocumentsPage() {
   const [isParsingFile, setIsParsingFile] = useState(false);
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
   const [submitDocumentId, setSubmitDocumentId] = useState<string | null>(null);
-  const [tableSize, setTableSize] = useState<"small" | "middle">("small");
-  const [tableVersion, setTableVersion] = useState(0);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     id: 110,
     type: 130,
@@ -263,21 +261,6 @@ export function MyDocumentsPage() {
     setDateFrom(undefined);
     setDateTo(undefined);
   };
-  const resetColumnWidths = () => {
-    const defaults = {
-      id: 110,
-      type: 130,
-      title: 240,
-      initiator: 190,
-      amount: 140,
-      createdAt: 165,
-      status: 155,
-      actions: 360
-    };
-    setColumnWidths(defaults);
-    localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(defaults));
-  };
-
   const hasActiveListFilters = Boolean(
     search.trim() || statusFilter || typeFilter || dateFrom || dateTo
   );
@@ -575,24 +558,6 @@ export function MyDocumentsPage() {
       <PageHeader
         title="Мои документы"
         subtitle="Создавайте, фильтруйте и отправляйте документы на согласование."
-        actions={
-          <Space wrap>
-            <Segmented
-              size="small"
-              value={tableSize}
-              onChange={(value) => setTableSize(value as "small" | "middle")}
-              options={[
-                { label: "Компактно", value: "small" },
-                { label: "Стандарт", value: "middle" }
-              ]}
-            />
-            <Button onClick={resetColumnWidths}>Сбросить ширины</Button>
-            <Button onClick={() => setTableVersion((v) => v + 1)}>Сбросить сортировку</Button>
-            <Button ref={createDocumentButtonRef} type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              Создать документ
-            </Button>
-          </Space>
-        }
       />
 
       <MyDocumentsStatusSummary stats={statusStats} loading={statusStatsLoading} isError={statusStatsError} />
@@ -670,6 +635,9 @@ export function MyDocumentsPage() {
                 Выгрузить в Excel
               </Button>
             </Tooltip>
+            <Button ref={createDocumentButtonRef} type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              Создать документ
+            </Button>
           </Space>
 
           {hasActiveListFilters ? (
@@ -715,7 +683,6 @@ export function MyDocumentsPage() {
           ) : null}
 
           <Table
-            key={tableVersion}
             className="app-table"
             rowKey="id"
             components={{
@@ -726,7 +693,7 @@ export function MyDocumentsPage() {
             columns={columns}
             dataSource={sortedData}
             loading={isLoading}
-            size={tableSize}
+            size="small"
             tableLayout="fixed"
             scroll={{ x: 1380 }}
             pagination={{ pageSize: 8 }}
