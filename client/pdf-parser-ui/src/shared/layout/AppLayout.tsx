@@ -223,7 +223,7 @@ export function AppLayout() {
                       <Typography.Text className="workspace-user-name" ellipsis>
                         {user?.fullName ?? "Пользователь"}
                       </Typography.Text>
-                      <Avatar size={34} className="workspace-user-avatar">
+                      <Avatar size={34} src={user?.avatarUrl || undefined} className="workspace-user-avatar">
                         {initials}
                       </Avatar>
                     </Space>
