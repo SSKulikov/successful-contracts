@@ -99,6 +99,14 @@ export type DocumentDetails = {
     subject: string;
     note?: string | null;
   };
+  attachments?: Array<{
+    id: string;
+    fileName: string;
+    originalName: string;
+    uploadedAt: string;
+    updatedAt: string;
+    url: string;
+  }>;
 };
 
 export type ApprovalRow = {
@@ -247,6 +255,13 @@ export type RegisteredCompanyRow = {
   companyName: string;
   inn: string;
   adminFullName: string;
+  email?: string;
+};
+
+export type CompanyProfile = {
+  companyId: number;
+  companyName: string;
+  inn: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
@@ -729,6 +744,23 @@ export const documentsApi = {
       params: companyId != null ? { companyId } : {}
     });
     return (response.data?.items ?? []) as CompanyEmployeeOption[];
+  },
+  async listDocumentAttachments(documentId: string) {
+    const response = await httpClient.get(`/documents/${documentId}/attachments`);
+    return (response.data?.items ?? []) as Array<{
+      id: string;
+      fileName: string;
+      originalName: string;
+      uploadedAt: string;
+      updatedAt: string;
+      url: string;
+    }>;
+  },
+  async uploadDocumentAttachment(documentId: string, file: File) {
+    const payload = new FormData();
+    payload.append("file", file);
+    const response = await httpClient.post(`/documents/${documentId}/attachments`, payload);
+    return response.data as { ok: boolean };
   }
 };
 
@@ -852,6 +884,16 @@ export const authApi = {
   async login(payload: { email: string; password: string }) {
     const response = await httpClient.post("/auth/login", payload);
     return response.data as { token: string; isTemporaryPassword: boolean; user: UserProfile };
+  },
+  async registerCompany(payload: {
+    companyName: string;
+    inn: string;
+    adminFullName: string;
+    email: string;
+    password: string;
+  }) {
+    const response = await httpClient.post("/auth/register-company", payload);
+    return response.data as { message?: string };
   }
 };
 
@@ -1000,5 +1042,80 @@ export const adminApi = {
     }
     const response = await httpClient.post(`/admin/companies/${id}/assign-admin`, payload);
     return response.data as { message?: string };
+  },
+  async listCompanyAdminEmployees(): Promise<EmployeeRow[]> {
+    const response = await httpClient.get("/company/admin/employees");
+    return response.data?.items ?? [];
+  },
+  async createCompanyAdminEmployee(payload: {
+    fullName: string;
+    email: string;
+    position: string;
+    roles: string[];
+  }) {
+    const response = await httpClient.post("/company/admin/employees", payload);
+    return response.data as { message?: string; oneTimePassword?: string };
+  },
+  async updateCompanyAdminEmployee(
+    employeeId: string,
+    payload: {
+      fullName: string;
+      email: string;
+      position: string;
+      roles: string[];
+      status: "Активен" | "Неактивен";
+    }
+  ) {
+    const response = await httpClient.patch(`/company/admin/employees/${employeeId}`, payload);
+    return response.data as { message?: string };
+  },
+  async deleteCompanyAdminEmployee(employeeId: string) {
+    const response = await httpClient.delete(`/company/admin/employees/${employeeId}`);
+    return response.data as { ok?: boolean; id?: string };
+  },
+  async listCompanyRoutes(): Promise<RouteRow[]> {
+    const response = await httpClient.get("/company/approval-routes");
+    return response.data?.items ?? [];
+  },
+  async createCompanyRoute(payload: {
+    name: string;
+    isDefault?: boolean;
+    documentType?: string | null;
+    steps: Array<{
+      stepOrder: number;
+      assigneeKind: "employee" | "role_default";
+      assigneeEmployeeId?: number;
+      roleKey?: string;
+      defaultEmployeeId?: number;
+    }>;
+  }) {
+    const response = await httpClient.post("/company/approval-routes", payload);
+    return response.data as { message?: string };
+  },
+  async updateCompanyRoute(
+    id: number,
+    payload: {
+      name: string;
+      isDefault?: boolean;
+      documentType?: string | null;
+      steps: Array<{
+        stepOrder: number;
+        assigneeKind: "employee" | "role_default";
+        assigneeEmployeeId?: number;
+        roleKey?: string;
+        defaultEmployeeId?: number;
+      }>;
+    }
+  ) {
+    const response = await httpClient.put(`/company/approval-routes/${id}`, payload);
+    return response.data as { message?: string };
+  },
+  async deleteCompanyRoute(id: number) {
+    const response = await httpClient.delete(`/company/approval-routes/${id}`);
+    return response.data as { message?: string };
+  },
+  async getMyCompanyProfile(): Promise<CompanyProfile> {
+    const response = await httpClient.get("/company/profile");
+    return response.data as CompanyProfile;
   }
 };

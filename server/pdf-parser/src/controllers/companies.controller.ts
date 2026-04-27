@@ -10,6 +10,7 @@ type CompanyListRow = {
   name: string;
   inn: string;
   admin_full_name: string | null;
+  admin_email: string | null;
   admin_employee_id: number | null;
 };
 
@@ -54,6 +55,13 @@ export async function listCompanies(req: Request, res: Response): Promise<void> 
           LIMIT 1
         ) AS admin_full_name,
         (
+          SELECT e.email
+          FROM employees e
+          WHERE e.company_id = c.id AND e.deleted_at IS NULL AND ${companyAdminRoleSqlCondition("e")}
+          ORDER BY e.id ASC
+          LIMIT 1
+        ) AS admin_email,
+        (
           SELECT e.id
           FROM employees e
           WHERE e.company_id = c.id AND e.deleted_at IS NULL AND ${companyAdminRoleSqlCondition("e")}
@@ -69,7 +77,8 @@ export async function listCompanies(req: Request, res: Response): Promise<void> 
       key: String(row.id),
       companyName: row.name,
       inn: row.inn,
-      adminFullName: row.admin_full_name ?? ""
+      adminFullName: row.admin_full_name ?? "",
+      email: row.admin_email ?? ""
     }));
 
     res.json({ items });

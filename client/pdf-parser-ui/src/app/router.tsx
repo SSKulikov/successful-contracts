@@ -11,7 +11,7 @@ const MyDocumentsPage = lazy(() => import("../pages/MyDocumentsPage").then((m) =
 const DocumentDetailsPage = lazy(() => import("../pages/DocumentDetailsPage").then((m) => ({ default: m.DocumentDetailsPage })));
 const MyApprovalsPage = lazy(() => import("../pages/MyApprovalsPage").then((m) => ({ default: m.MyApprovalsPage })));
 const ProfilePage = lazy(() => import("../pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
-const AdminPanelPage = lazy(() => import("../pages/AdminPanelPage").then((m) => ({ default: m.AdminPanelPage })));
+const DynamicAdminPage = lazy(() => import("../pages/DynamicAdminPage").then((m) => ({ default: m.DynamicAdminPage })));
 
 function withSuspense(element: ReactNode) {
   return (
@@ -33,7 +33,7 @@ export const appRouter = createBrowserRouter([
       { path: "documents/:id", element: withSuspense(<DocumentDetailsPage />) },
       { path: "my-approvals", element: withSuspense(<MyApprovalsPage />) },
       { path: "profile", element: withSuspense(<ProfilePage />) },
-      { path: "admin-panel", element: withSuspense(<AdminPanelPage />) }
+      { path: "admin-panel", element: withSuspense(<DynamicAdminPage />) }
     ]
   }
 ]);

@@ -8,6 +8,7 @@ import { resolveAvatarPublicUrl } from "../utils/avatar-public-url";
 import { signAccessToken } from "../utils/jwt";
 import { hashPassword, verifyPasswordOrMigrate } from "../utils/passwords";
 import { ensureAuthSessionsTable } from "./admin.controller";
+import { PLATFORM_DEMO_ADMIN_EMAIL } from "./admin.controller";
 import { logger } from "../utils/logger";
 
 /** Имя/ИНН компании: драйверы иногда отдают ключи как `company_name`, иногда как `companyName`. */
@@ -70,7 +71,7 @@ export function mapEmployeeProfile(row: EmployeeAccountRow, req: Request) {
   }
 
   const isAdmin = roles.includes("admin");
-  const roleLabel = isAdmin ? "Администратор" : "Сотрудник";
+  const roleLabel = row.email === PLATFORM_DEMO_ADMIN_EMAIL ? "Владелец платформы" : isAdmin ? "Администратор" : "Сотрудник";
   const { companyName, companyInn } = companyDisplayFields(row);
   return {
     fullName: row.full_name,

@@ -1,6 +1,6 @@
-import { CheckOutlined, CloseOutlined, MoreOutlined, UndoOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, MoreOutlined, PaperClipOutlined, UndoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Dropdown, Grid, Input, Select, Space, Table, Typography, message } from "antd";
+import { Button, Card, Dropdown, Grid, Input, Modal, Select, Space, Table, Typography, message } from "antd";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -17,7 +17,7 @@ import { formatDateTime, formatMoney } from "../shared/utils/format";
 import { getApiErrorMessage } from "../shared/utils/api-error";
 import { ApiErrorState } from "../shared/components/ApiErrorState";
 import { confirmCommentAction } from "../shared/utils/confirm-actions";
-import { ApprovalRow, approvalsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
+import { ApprovalRow, approvalsApi, documentsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 
 function formatWaitingDays(days: number): string {
@@ -31,6 +31,7 @@ function formatWaitingDays(days: number): string {
 }
 
 export function MyApprovalsPage() {
+  const VIEWED_KEY = "viewed-documents";
   const COLUMN_WIDTHS_STORAGE_KEY = "my-approvals-column-widths";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -52,6 +53,10 @@ export function MyApprovalsPage() {
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(8);
+  const [viewedDocIds, setViewedDocIds] = useState<string[]>([]);
+  const [attachmentsPickerOpen, setAttachmentsPickerOpen] = useState(false);
+  const [attachmentsPickerDocumentId, setAttachmentsPickerDocumentId] = useState<string | null>(null);
+  const [selectedAttachmentUrl, setSelectedAttachmentUrl] = useState<string | null>(null);
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
   const mutationError = (error: unknown) => message.error(getApiErrorMessage(error));
@@ -69,11 +74,35 @@ export function MyApprovalsPage() {
 
   useEffect(() => {
     try {
+      const raw = localStorage.getItem(VIEWED_KEY);
+      setViewedDocIds(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      setViewedDocIds([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
     } catch {
       /* ignore quota errors */
     }
   }, [columnWidths]);
+  const markViewed = (docId?: string) => {
+    if (!docId) return;
+    setViewedDocIds((prev) => {
+      if (prev.includes(docId)) return prev;
+      const next = [...prev, docId];
+      localStorage.setItem(VIEWED_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+  const openAttachmentsPicker = (docId?: string) => {
+    if (!docId) return;
+    setAttachmentsPickerDocumentId(docId);
+    setSelectedAttachmentUrl(null);
+    setAttachmentsPickerOpen(true);
+  };
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["my-approvals", { search, typeFilter, page, pageSize }],
@@ -84,6 +113,11 @@ export function MyApprovalsPage() {
         page,
         pageSize
       })
+  });
+  const { data: pickedAttachments = [], isLoading: isLoadingPickedAttachments } = useQuery({
+    queryKey: ["approvals-document-attachments", attachmentsPickerDocumentId],
+    queryFn: () => documentsApi.listDocumentAttachments(attachmentsPickerDocumentId!),
+    enabled: attachmentsPickerOpen && Boolean(attachmentsPickerDocumentId)
   });
   const approveMutation = useMutation({
     mutationFn: ({ approvalId }: { approvalId: string; documentId?: string }) => approvalsApi.approve(approvalId),
@@ -151,7 +185,7 @@ export function MyApprovalsPage() {
     if (!isMobile) {
       return (
         <Space wrap size={[4, 4]} className="table-actions-cell">
-          <Button type="link" disabled={actionInProgress} onClick={() => navigate(`/documents/${row.documentId ?? row.id}`)}>
+          <Button type="link" disabled={actionInProgress} onClick={() => { markViewed(row.documentId); navigate(`/documents/${row.documentId ?? row.id}`); }}>
             Открыть
           </Button>
           {row.canTakeDecision !== false ? (
@@ -181,7 +215,10 @@ export function MyApprovalsPage() {
       {
         key: "open",
         label: "Открыть",
-        onClick: () => navigate(`/documents/${row.documentId ?? row.id}`)
+        onClick: () => {
+          markViewed(row.documentId);
+          navigate(`/documents/${row.documentId ?? row.id}`);
+        }
       }
     ];
     if (row.canTakeDecision !== false) {
@@ -223,6 +260,19 @@ export function MyApprovalsPage() {
     };
 
   const columns: ColumnsType<ApprovalRow> = [
+    {
+      title: "",
+      dataIndex: "documentId",
+      key: "attach",
+      width: 48,
+      render: (_: unknown, row: ApprovalRow) => (
+        <Button
+          type="text"
+          icon={<PaperClipOutlined />}
+          onClick={() => openAttachmentsPicker(row.documentId)}
+        />
+      )
+    },
     { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id },
     {
       title: "Тип",
@@ -349,7 +399,9 @@ export function MyApprovalsPage() {
             columns={columns}
             dataSource={sortedApprovals}
             rowClassName={(record) =>
-              record.canTakeDecision === false ? "my-approvals-row--view-only" : "my-approvals-row--actionable"
+              `${record.canTakeDecision === false ? "my-approvals-row--view-only" : "my-approvals-row--actionable"} ${
+                record.documentId && !viewedDocIds.includes(record.documentId) ? "doc-row-unread" : ""
+              }`
             }
             tableLayout="fixed"
             scroll={{ x: 1450 }}
@@ -386,6 +438,28 @@ export function MyApprovalsPage() {
           />
         </Space>
       </Card>
+      <Modal
+        title="Открыть прикрепленный документ"
+        open={attachmentsPickerOpen}
+        onCancel={() => setAttachmentsPickerOpen(false)}
+        onOk={() => {
+          if (selectedAttachmentUrl) window.open(selectedAttachmentUrl, "_blank", "noopener,noreferrer");
+        }}
+        okButtonProps={{ disabled: !selectedAttachmentUrl }}
+        okText="Открыть"
+      >
+        <Select
+          style={{ width: "100%" }}
+          loading={isLoadingPickedAttachments}
+          placeholder="Выберите файл"
+          value={selectedAttachmentUrl ?? undefined}
+          onChange={(value) => setSelectedAttachmentUrl(value)}
+          options={pickedAttachments.map((item) => ({
+            value: item.url,
+            label: `${item.originalName} (${item.uploadedAt})`
+          }))}
+        />
+      </Modal>
     </div>
   );
 }

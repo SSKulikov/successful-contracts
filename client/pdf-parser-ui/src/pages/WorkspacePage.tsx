@@ -26,7 +26,22 @@ export function WorkspacePage() {
     return user ? isPlatformAdminUser(user) : false;
   }, [location.pathname]);
 
-  const items = [
+  const commonItems = [
+    {
+      key: "profile",
+      label: "Профиль",
+      children: (
+        <Card>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            <Button type="primary" onClick={() => navigate("/profile")}>
+              Перейти в профиль
+            </Button>
+          </Space>
+        </Card>
+      )
+    }
+  ];
+  const tenantItems = [
     {
       key: "my-documents",
       label: "Мои документы",
@@ -57,29 +72,20 @@ export function WorkspacePage() {
         </Card>
       )
     },
-    {
-      key: "profile",
-      label: "Профиль",
-      children: (
-        <Card>
-          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Button type="primary" onClick={() => navigate("/profile")}>
-              Перейти в профиль
-            </Button>
-          </Space>
-        </Card>
-      )
-    },
+    ...commonItems
+  ];
+  const platformItems = [
+    ...commonItems,
     ...(showAdminTab
       ? [
           {
             key: "admin-panel",
-            label: "Админ-панель",
+            label: "Управление компаниями",
             children: (
               <Card>
                 <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                   <Button type="primary" onClick={() => navigate("/admin-panel")}>
-                    Перейти в админ-панель
+                    Перейти в управление компаниями
                   </Button>
                 </Space>
               </Card>
@@ -88,6 +94,7 @@ export function WorkspacePage() {
         ]
       : [])
   ];
+  const items = showAdminTab ? platformItems : tenantItems;
 
   return (
     <div>

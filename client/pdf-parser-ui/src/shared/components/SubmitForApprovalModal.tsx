@@ -26,6 +26,14 @@ function routesForDocumentType(routes: RouteRow[], documentType: string): RouteR
   return routes.filter((r) => !r.documentType || r.documentType === documentType);
 }
 
+function routesForCompany(routes: RouteRow[], companyId: number | null, isPlatformAdmin: boolean): RouteRow[] {
+  if (companyId != null) {
+    return routes.filter((r) => Number(r.companyId) === Number(companyId));
+  }
+  if (isPlatformAdmin) return [];
+  return routes;
+}
+
 export function SubmitForApprovalModal(props: SubmitForApprovalModalProps) {
   const { open, documentId, documentType, companyId, isPlatformAdmin, submitLoading, onClose, onSubmit } = props;
   const [phase, setPhase] = useState<"configure" | "review">("configure");
@@ -41,7 +49,10 @@ export function SubmitForApprovalModal(props: SubmitForApprovalModalProps) {
     enabled: open && (isPlatformAdmin ? companyId != null : true)
   });
 
-  const matchedRoutes = useMemo(() => routesForDocumentType(routes, documentType), [routes, documentType]);
+  const matchedRoutes = useMemo(
+    () => routesForDocumentType(routesForCompany(routes, companyId, isPlatformAdmin), documentType),
+    [routes, companyId, isPlatformAdmin, documentType]
+  );
 
   useEffect(() => {
     if (!open) {

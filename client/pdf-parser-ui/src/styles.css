@@ -956,12 +956,11 @@ body {
   margin-top: 8px;
 }
 
-.doc-detail-timeline__meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: right;
-  max-width: 160px;
+.doc-detail-timeline__entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .doc-detail-timeline__date {
@@ -978,10 +977,14 @@ body {
 .doc-detail-timeline__action {
   font-size: 14px;
   color: #0f172a;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 /* «В работе»: акцент на задачах, где можно вынести решение */
+
+.doc-row-unread td {
+  font-weight: 700;
+}
 .my-approvals-table .ant-table-tbody > tr.my-approvals-row--actionable > td {
   background: rgba(51, 65, 85, 0.07);
   border-bottom-color: #e8ecf4;

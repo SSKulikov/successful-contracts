@@ -24,7 +24,15 @@ export function LandingPage() {
             className="landing-btn-primary"
             onClick={() => navigate("/auth")}
           >
-            Запустить в компании
+            Начать работать
+          </Button>
+          <Button
+            size="large"
+            type="primary"
+            className="landing-btn-primary"
+            onClick={() => navigate("/auth?tab=register")}
+          >
+            Зарегистрироваться
           </Button>
         </div>
         <Typography.Paragraph className="landing-hint">
@@ -191,7 +199,10 @@ export function LandingPage() {
         </Typography.Title>
         <div className="landing-actions">
           <Button type="primary" size="large" className="landing-btn-primary" onClick={() => navigate("/auth")}>
-            Запустить в компании
+            Начать работать
+          </Button>
+          <Button type="primary" size="large" className="landing-btn-primary" onClick={() => navigate("/auth?tab=register")}>
+            Зарегистрироваться
           </Button>
         </div>
       </section>
