@@ -23,6 +23,9 @@ import {
 } from "../services/NotificationService";
 import { ensureEmployeesTable } from "./admin.controller";
 import { parseApproverEmployeeIds } from "../utils/parse-approver-employee-ids";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
 
 type DocumentStatus = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
 
@@ -95,6 +98,7 @@ type DocumentDetailsResponse = {
     subject: string;
     note: string | null;
   };
+  attachments?: Array<{ id: string; fileName: string; originalName: string; uploadedAt: string; updatedAt: string; url: string }>;
 };
 
 const ROLE_STEP_LABEL_FOR_DOC: Record<string, string> = {
@@ -210,8 +214,10 @@ function buildDocumentListWhere(employee: EmployeeAuthContext, filters: Document
       values.push(employee.companyId);
     }
   } else {
-    conditions.push("(d.created_by = ? OR d.last_edited_by = ?)");
-    values.push(employee.id, employee.id);
+    conditions.push(
+      "(d.created_by = ? OR d.last_edited_by = ? OR EXISTS (SELECT 1 FROM approval_tasks t WHERE t.document_id = d.id AND t.assignee_user_id = ?))"
+    );
+    values.push(employee.id, employee.id, employee.id);
 
     if (employee.companyId === null) {
       conditions.push("d.company_id IS NULL");
@@ -273,6 +279,56 @@ function buildDocumentListWhere(employee: EmployeeAuthContext, filters: Document
   return { whereClause, values };
 }
 
+function getDocumentAttachmentsRoot(): string {
+  return path.resolve(process.cwd(), "uploads", "documents");
+}
+
+function normalizeUploadedOriginalName(fileName: string): string {
+  try {
+    const decoded = Buffer.from(fileName, "latin1").toString("utf8");
+    return decoded.trim() || fileName;
+  } catch {
+    return fileName;
+  }
+}
+
+function buildAttachmentPublicUrl(req: Request, fileName: string): string {
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
+  const host = req.get("host");
+  return `${proto}://${host}/api/document-files/${encodeURIComponent(fileName)}`;
+}
+
+async function ensureDocumentAttachmentsTable(): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS document_attachments (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      document_id BIGINT UNSIGNED NOT NULL,
+      company_id BIGINT UNSIGNED NULL,
+      file_name VARCHAR(255) NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      mime_type VARCHAR(128) NULL,
+      uploaded_by BIGINT UNSIGNED NOT NULL,
+      created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX idx_doc_attachments_document_id (document_id),
+      INDEX idx_doc_attachments_company_id (company_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+}
+
+const attachmentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(getDocumentAttachmentsRoot(), { recursive: true });
+      cb(null, getDocumentAttachmentsRoot());
+    },
+    filename: (_req, file, cb) => {
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${path.extname(file.originalname)}`);
+    }
+  }),
+  limits: { fileSize: 30 * 1024 * 1024 }
+}).single("file");
+
 function parseAmount(rawAmount: unknown) {
   if (typeof rawAmount === "number") return rawAmount;
   if (typeof rawAmount === "string") {
@@ -287,7 +343,7 @@ const MY_DOCUMENTS_LIST_CACHE_TTL_SECONDS = 120;
 
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
-  return `doc:v2:${companyPart}:${documentId}`;
+  return `doc:v3:${companyPart}:${documentId}`;
 }
 
 function buildMyDocumentsListCacheKey(employee: EmployeeAuthContext, filters: DocumentListFilters): string {
@@ -1304,6 +1360,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
         comment: string | null;
         created_at: Date;
         actor_name: string | null;
+        actor_position: string | null;
       }>
     >(
       `
@@ -1312,7 +1369,8 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
           e.event_type,
           e.comment,
           e.created_at,
-          CASE WHEN emp.deleted_at IS NOT NULL THEN NULL ELSE emp.full_name END AS actor_name
+          CASE WHEN emp.deleted_at IS NOT NULL THEN NULL ELSE emp.full_name END AS actor_name,
+          CASE WHEN emp.deleted_at IS NOT NULL THEN NULL ELSE emp.position END AS actor_position
         FROM approval_document_events e
         LEFT JOIN employees emp ON emp.id = e.actor_id
         WHERE e.document_id = ?
@@ -1325,7 +1383,10 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       id: String(event.id),
       date: formatDateTime(event.created_at),
       action: event.comment ? `${mapEventAction(event.event_type)}: ${event.comment}` : mapEventAction(event.event_type),
-      author: event.actor_name ?? "Удаленный пользователь",
+      author:
+        event.actor_name != null
+          ? `${event.actor_name} (${event.actor_position?.trim() || "Должность не указана"})`
+          : "Удаленный пользователь",
       variant: mapHistoryVariant(event.event_type)
     }));
 
@@ -1365,8 +1426,23 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
         executorInn: doc.executor_inn,
         subject: doc.subject,
         note: doc.note
-      }
+      },
+      attachments: []
     };
+
+    await ensureDocumentAttachmentsTable();
+    const attachmentRows = await prisma.$queryRawUnsafe<Array<{ id: number; file_name: string; original_name: string; created_at: Date; updated_at: Date }>>(
+      `SELECT id, file_name, original_name, created_at, updated_at FROM document_attachments WHERE document_id = ? ORDER BY created_at DESC`,
+      documentId
+    );
+    responsePayload.attachments = attachmentRows.map((row) => ({
+      id: String(row.id),
+      fileName: row.file_name,
+      originalName: row.original_name,
+      uploadedAt: formatDateTime(row.created_at),
+      updatedAt: formatDateTime(row.updated_at),
+      url: buildAttachmentPublicUrl(req, row.file_name)
+    }));
 
     await setJson(cacheKey, responsePayload);
     res.json(responsePayload);
@@ -1374,6 +1450,83 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
     logger.error(`❌ Ошибка получения карточки документа: ${error}`);
     res.status(500).json({ message: "Ошибка получения карточки документа" });
   }
+}
+
+export async function listDocumentAttachments(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+    await ensureDocumentAttachmentsTable();
+    const employee = req.authContext!;
+    const documentId = Number(req.params.id);
+    const document = await getApprovalDocumentAccessRow(documentId);
+    if (!document) {
+      res.status(404).json({ message: "Документ не найден" });
+      return;
+    }
+    if (!canAccessDocumentCompany(employee, document.company_id)) {
+      res.status(403).json({ message: "Документ принадлежит другой компании" });
+      return;
+    }
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; file_name: string; original_name: string; created_at: Date; updated_at: Date }>>(
+      `SELECT id, file_name, original_name, created_at, updated_at FROM document_attachments WHERE document_id = ? ORDER BY created_at DESC`,
+      documentId
+    );
+    res.json({
+      items: rows.map((row) => ({
+        id: String(row.id),
+        fileName: row.file_name,
+        originalName: row.original_name,
+        uploadedAt: formatDateTime(row.created_at),
+        updatedAt: formatDateTime(row.updated_at),
+        url: buildAttachmentPublicUrl(req, row.file_name)
+      }))
+    });
+  } catch (error) {
+    logger.error(`❌ Ошибка списка вложений: ${error}`);
+    res.status(500).json({ message: "Ошибка списка вложений" });
+  }
+}
+
+export async function uploadDocumentAttachment(req: Request, res: Response): Promise<void> {
+  attachmentUpload(req, res, async (err) => {
+    if (err) {
+      res.status(400).json({ message: err instanceof Error ? err.message : "Ошибка загрузки файла" });
+      return;
+    }
+    try {
+      await ensureApprovalDomainTables();
+      await ensureDocumentAttachmentsTable();
+      const employee = req.authContext!;
+      const documentId = Number(req.params.id);
+      const document = await getApprovalDocumentAccessRow(documentId);
+      if (!document) {
+        res.status(404).json({ message: "Документ не найден" });
+        return;
+      }
+      if (!canAccessDocumentCompany(employee, document.company_id)) {
+        res.status(403).json({ message: "Документ принадлежит другой компании" });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ message: "Файл не загружен" });
+        return;
+      }
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO document_attachments (document_id, company_id, file_name, original_name, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)`,
+        documentId,
+        document.company_id,
+        req.file.filename,
+        normalizeUploadedOriginalName(req.file.originalname),
+        req.file.mimetype,
+        employee.id
+      );
+      await del(getDocumentCacheKey(document.company_id, documentId));
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      logger.error(`❌ Ошибка загрузки вложения: ${error}`);
+      res.status(500).json({ message: "Ошибка загрузки вложения" });
+    }
+  });
 }
 
 /** Сотрудники компании для выбора цепочки согласования (активные, не удалённые). */

@@ -23,10 +23,12 @@ import {
   exportDocumentsXlsx,
   getDocumentById,
   listCompanyEmployees,
+  listDocumentAttachments,
   listMyDocuments,
   getMyDocumentsStatusStats,
   resubmitDocument,
   submitDocument,
+  uploadDocumentAttachment,
   updateDocument,
   withdrawDocument
 } from "./controllers/documents.controller";
@@ -37,12 +39,20 @@ import {
   markNotificationRead
 } from "./controllers/notifications.controller";
 import { createRouteAdmin, listRoutesAdmin, updateRouteAdmin, deleteRouteAdmin, listCompanyRoutes } from "./controllers/approval-routes.controller";
+import { createCompanyRoute, deleteCompanyRoute, updateCompanyRoute } from "./controllers/approval-routes.controller";
 import { getHealth } from "./controllers/health.controller";
 import { requireAuth } from "./middleware/requireAuth";
 import { requirePasswordNotTemporary } from "./middleware/requirePasswordNotTemporary";
 import { requirePlatformAdmin } from "./middleware/requirePlatformAdmin";
 import { loginRateLimiter } from "./middleware/loginRateLimiter";
 import { handleAvatarUpload } from "./middleware/uploadAvatar";
+import {
+  createCompanyAdminEmployee,
+  deleteCompanyAdminEmployee,
+  getMyCompanyProfile,
+  listCompanyAdminEmployees,
+  updateCompanyAdminEmployee
+} from "./controllers/company-admin.controller";
 
 const router = Router();
 
@@ -71,8 +81,17 @@ router.post("/admin/routes", requireAuth, requirePasswordNotTemporary, requirePl
 router.put("/admin/routes/:id", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, updateRouteAdmin);
 router.delete("/admin/routes/:id", requireAuth, requirePasswordNotTemporary, requirePlatformAdmin, deleteRouteAdmin);
 router.get("/company/approval-routes", requireAuth, listCompanyRoutes);
+router.post("/company/approval-routes", requireAuth, requirePasswordNotTemporary, createCompanyRoute);
+router.put("/company/approval-routes/:id", requireAuth, requirePasswordNotTemporary, updateCompanyRoute);
+router.delete("/company/approval-routes/:id", requireAuth, requirePasswordNotTemporary, deleteCompanyRoute);
 router.get("/company/employees", requireAuth, listCompanyEmployees);
+router.get("/company/admin/employees", requireAuth, listCompanyAdminEmployees);
+router.post("/company/admin/employees", requireAuth, requirePasswordNotTemporary, createCompanyAdminEmployee);
+router.patch("/company/admin/employees/:id", requireAuth, requirePasswordNotTemporary, updateCompanyAdminEmployee);
+router.delete("/company/admin/employees/:id", requireAuth, requirePasswordNotTemporary, deleteCompanyAdminEmployee);
+router.get("/company/profile", requireAuth, getMyCompanyProfile);
 router.post("/auth/login", loginRateLimiter, login);
+router.post("/auth/register-company", createCompany);
 router.get("/users/me", requireAuth, getMyProfile);
 router.patch("/users/me", requireAuth, requirePasswordNotTemporary, updateMyProfile);
 router.post("/users/me/avatar", requireAuth, requirePasswordNotTemporary, handleAvatarUpload, uploadMyAvatar);
@@ -82,6 +101,8 @@ router.get("/documents/my", requireAuth, listMyDocuments);
 router.get("/documents/my/stats", requireAuth, getMyDocumentsStatusStats);
 router.get("/documents/export.xlsx", requireAuth, exportDocumentsXlsx);
 router.get("/documents/:id", requireAuth, getDocumentById);
+router.get("/documents/:id/attachments", requireAuth, listDocumentAttachments);
+router.post("/documents/:id/attachments", requireAuth, requirePasswordNotTemporary, uploadDocumentAttachment);
 router.patch("/documents/:id", requireAuth, requirePasswordNotTemporary, updateDocument);
 router.post("/documents/:id/submit", requireAuth, requirePasswordNotTemporary, submitDocument);
 router.post("/documents/:id/resubmit", requireAuth, requirePasswordNotTemporary, resubmitDocument);

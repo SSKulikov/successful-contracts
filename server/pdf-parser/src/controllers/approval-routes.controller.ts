@@ -436,10 +436,6 @@ export async function listCompanyRoutes(req: Request, res: Response): Promise<vo
     await ensureApprovalDomainTables();
 
     const employee = req.authContext!;
-    if (employee.role !== "admin") {
-      res.status(403).json({ message: "Маршруты компании доступны только администратору компании" });
-      return;
-    }
     if (!employee.companyId) {
       res.status(403).json({ message: "У вас нет привязки к компании" });
       return;
@@ -465,5 +461,71 @@ export async function listCompanyRoutes(req: Request, res: Response): Promise<vo
   } catch (error) {
     logger.error(`❌ Ошибка списка маршрутов компании: ${error}`);
     res.status(500).json({ message: "Ошибка получения маршрутов" });
+  }
+}
+
+export async function createCompanyRoute(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+    const employee = req.authContext!;
+    if (employee.role !== "admin" || !employee.companyId) {
+      res.status(403).json({ message: "Доступно только администратору компании" });
+      return;
+    }
+    req.body = { ...(req.body ?? {}), companyId: employee.companyId };
+    await createRouteAdmin(req, res);
+  } catch (error) {
+    logger.error(`❌ Ошибка создания маршрута компании: ${error}`);
+    res.status(500).json({ message: "Ошибка создания маршрута компании" });
+  }
+}
+
+export async function updateCompanyRoute(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+    const employee = req.authContext!;
+    if (employee.role !== "admin" || !employee.companyId) {
+      res.status(403).json({ message: "Доступно только администратору компании" });
+      return;
+    }
+    const routeId = Number(req.params.id);
+    const row = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM approval_routes WHERE id = ? AND company_id = ? LIMIT 1`,
+      routeId,
+      employee.companyId
+    );
+    if (!row[0]) {
+      res.status(404).json({ message: "Маршрут не найден" });
+      return;
+    }
+    await updateRouteAdmin(req, res);
+  } catch (error) {
+    logger.error(`❌ Ошибка обновления маршрута компании: ${error}`);
+    res.status(500).json({ message: "Ошибка обновления маршрута компании" });
+  }
+}
+
+export async function deleteCompanyRoute(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureApprovalDomainTables();
+    const employee = req.authContext!;
+    if (employee.role !== "admin" || !employee.companyId) {
+      res.status(403).json({ message: "Доступно только администратору компании" });
+      return;
+    }
+    const routeId = Number(req.params.id);
+    const row = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+      `SELECT id FROM approval_routes WHERE id = ? AND company_id = ? LIMIT 1`,
+      routeId,
+      employee.companyId
+    );
+    if (!row[0]) {
+      res.status(404).json({ message: "Маршрут не найден" });
+      return;
+    }
+    await deleteRouteAdmin(req, res);
+  } catch (error) {
+    logger.error(`❌ Ошибка удаления маршрута компании: ${error}`);
+    res.status(500).json({ message: "Ошибка удаления маршрута компании" });
   }
 }
