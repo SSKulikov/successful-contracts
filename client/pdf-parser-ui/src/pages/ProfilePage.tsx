@@ -12,6 +12,7 @@ import {
   PROFILE_PASSWORD_REQUIRED_QUERY,
   UserProfile,
   getStoredUserProfile,
+  isPlatformAdminUser,
   profileApi
 } from "../shared/api";
 import { PageHeader } from "../shared/components/PageHeader";
@@ -90,6 +91,10 @@ export function ProfilePage() {
   });
 
   const currentProfile = profile ?? storedUser ?? null;
+  const displayRoleLabel =
+    currentProfile && isPlatformAdminUser(currentProfile)
+      ? "Владелец платформы"
+      : currentProfile?.roleLabel ?? "Сотрудник";
 
   useEffect(() => {
     if (!profile) return;
@@ -166,7 +171,7 @@ export function ProfilePage() {
               <Typography.Title level={5} style={{ marginBottom: 0 }}>
                 {currentProfile?.fullName ?? "Пользователь"}
               </Typography.Title>
-              <Typography.Text type="secondary">{currentProfile?.roleLabel ?? "Сотрудник"}</Typography.Text>
+              <Typography.Text type="secondary">{displayRoleLabel}</Typography.Text>
               {currentProfile?.companyId != null ? (
                 <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                   {currentProfile.companyName?.trim()

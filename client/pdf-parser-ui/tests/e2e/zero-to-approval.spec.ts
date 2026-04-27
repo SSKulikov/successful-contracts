@@ -30,7 +30,7 @@ test("zero to approved critical path", async ({ page }) => {
             id: 101,
             fullName: "Тестовый Сотрудник",
             email: "employee@test.local",
-            role: "EMPLOYEE",
+            role: "employee",
             companyId: 1,
             mustChangePassword: false
           }
@@ -152,7 +152,7 @@ test("zero to approved critical path", async ({ page }) => {
   });
 
   await page.goto("/auth");
-  await expect(page.getByText("Вход в систему").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Доступ в систему").first()).toBeVisible({ timeout: 15_000 });
 
   await page.getByLabel("Email или логин").fill("employee@test.local");
   await page.getByLabel("Пароль").fill("test-password");
@@ -165,7 +165,7 @@ test("zero to approved critical path", async ({ page }) => {
   await page.getByTitle("Договор").click();
   await page.getByLabel("Номер").fill("501");
   await page.getByLabel("Дата").fill("2026-04-21");
-  await page.getByLabel("Наименование заказчика").fill("ООО Заказчик");
+  await page.getByLabel("Заказчик/Плательщик").fill("ООО Заказчик");
   await page.getByLabel("ИНН заказчика").fill("7701234567");
   await page.getByLabel("Наименование исполнителя").fill("ООО Исполнитель");
   await page.getByLabel("ИНН исполнителя").fill("7707654321");

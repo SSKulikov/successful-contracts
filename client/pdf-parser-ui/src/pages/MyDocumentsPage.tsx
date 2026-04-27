@@ -1,6 +1,6 @@
-import { DownloadOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
+import { DownloadOutlined, MoreOutlined, PaperClipOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, DatePicker, Dropdown, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, DatePicker, Dropdown, Form, Grid, Input, InputNumber, Modal, Progress, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ResizeCallbackData } from "react-resizable";
 import type { MenuProps } from "antd";
@@ -36,8 +36,21 @@ import {
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 import { MyDocumentsStatusSummary } from "./MyDocumentsStatusSummary";
 
+function normalizeDetectedDocumentType(raw: unknown): string | undefined {
+  const value = String(raw ?? "").trim();
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
+  if (lower.includes("упд")) return "УПД";
+  if (lower.includes("счет")) return "Счет на оплату";
+  if (lower.includes("акт")) return "Акт";
+  if (lower.includes("наклад")) return "Накладная";
+  if (lower.includes("договор")) return "Договор";
+  return undefined;
+}
+
 export function MyDocumentsPage() {
   const COLUMN_WIDTHS_STORAGE_KEY = "my-documents-column-widths";
+  const VIEWED_KEY = "viewed-documents";
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -55,10 +68,17 @@ export function MyDocumentsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null);
   const [isParsingFile, setIsParsingFile] = useState(false);
+  const [parsingProgress, setParsingProgress] = useState(0);
+  const [parsedSourceFile, setParsedSourceFile] = useState<File | null>(null);
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
   const [submitDocumentId, setSubmitDocumentId] = useState<string | null>(null);
+  const [submitAfterSave, setSubmitAfterSave] = useState(false);
+  const [attachmentsPickerOpen, setAttachmentsPickerOpen] = useState(false);
+  const [attachmentsPickerDocumentId, setAttachmentsPickerDocumentId] = useState<string | null>(null);
+  const [selectedAttachmentUrl, setSelectedAttachmentUrl] = useState<string | null>(null);
   const [tableSize, setTableSize] = useState<"small" | "middle">("small");
   const [tableVersion, setTableVersion] = useState(0);
+  const [viewedDocIds, setViewedDocIds] = useState<string[]>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     id: 110,
     type: 130,
@@ -73,6 +93,15 @@ export function MyDocumentsPage() {
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
   const isEmployee = Boolean(me && !isPlatformAdminUser(me));
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VIEWED_KEY);
+      setViewedDocIds(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      setViewedDocIds([]);
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -140,12 +169,28 @@ export function MyDocumentsPage() {
       }
       return documentsApi.createDocument(payload);
     },
-    onSuccess: () => {
+    onSuccess: (response: { id?: string } | undefined) => {
       message.success(editingDocumentId ? "Документ обновлен" : "Документ создан");
       setIsModalOpen(false);
       setEditingDocumentId(null);
       form.resetFields();
       queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      if (!editingDocumentId && response?.id && parsedSourceFile) {
+        void documentsApi
+          .uploadDocumentAttachment(response.id, parsedSourceFile)
+          .then(() => {
+            message.success("Исходный загруженный файл автоматически прикреплен к документу");
+          })
+          .catch(() => {
+            message.warning("Документ создан, но исходный файл не удалось прикрепить автоматически");
+          });
+      }
+      setParsedSourceFile(null);
+      if (!editingDocumentId && submitAfterSave && response?.id) {
+        setSubmitDocumentId(response.id);
+        setSubmitRouteModalOpen(true);
+      }
+      setSubmitAfterSave(false);
     },
     onError: mutationError
   });
@@ -212,6 +257,20 @@ export function MyDocumentsPage() {
     },
     onError: mutationError
   });
+  const {
+    data: pickedAttachments = [],
+    isLoading: isLoadingPickedAttachments
+  } = useQuery({
+    queryKey: ["document-attachments", attachmentsPickerDocumentId],
+    queryFn: () => documentsApi.listDocumentAttachments(attachmentsPickerDocumentId!),
+    enabled: attachmentsPickerOpen && Boolean(attachmentsPickerDocumentId)
+  });
+  const openAttachmentsPicker = (documentId: string) => {
+    setAttachmentsPickerDocumentId(documentId);
+    setSelectedAttachmentUrl(null);
+    setAttachmentsPickerOpen(true);
+  };
+
 
   const watchedCompanyId = Form.useWatch("companyId", form);
 
@@ -228,6 +287,7 @@ export function MyDocumentsPage() {
   const openCreateModal = () => {
     setEditingDocumentId(null);
     form.resetFields();
+    setParsedSourceFile(null);
     if (!isPlatformAdmin && me?.companyInn) {
       form.setFieldsValue({ customerInn: me.companyInn });
     }
@@ -291,6 +351,14 @@ export function MyDocumentsPage() {
   const handlePickFile = () => {
     fileInputRef.current?.click();
   };
+  const markViewed = (docId: string) => {
+    setViewedDocIds((prev) => {
+      if (prev.includes(docId)) return prev;
+      const next = [...prev, docId];
+      localStorage.setItem(VIEWED_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -313,15 +381,31 @@ export function MyDocumentsPage() {
     }
 
     setIsParsingFile(true);
+    setParsingProgress(8);
+    const progressTimer = window.setInterval(() => {
+      setParsingProgress((prev) => {
+        if (prev >= 92) return prev;
+        const step = prev < 40 ? 8 : prev < 70 ? 5 : 2;
+        return Math.min(92, prev + step);
+      });
+    }, 180);
     try {
       const response = await contractsApi.parseFile(file);
       const parsed = response?.parsedJson ?? {};
       const parsedAmount = Number(String(parsed?.contract_sum ?? "").replace(",", ".").replace(/\s+/g, ""));
 
+      const detectedTypeRaw =
+        parsed?.document_type ??
+        parsed?.doc_type ??
+        parsed?.type ??
+        parsed?.contract_type;
+      const inferredType = normalizeDetectedDocumentType(detectedTypeRaw);
+      setParsedSourceFile(file);
       form.setFieldsValue({
+        type: inferredType ?? form.getFieldValue("type"),
         number: parsed?.contract_number ?? form.getFieldValue("number"),
         date: parsed?.contract_date ?? form.getFieldValue("date"),
-        customerName: parsed?.customer?.name ?? form.getFieldValue("customerName"),
+        customerName: parsed?.customer?.name ?? parsed?.payer?.name ?? form.getFieldValue("customerName"),
         customerInn: parsed?.customer?.inn ?? form.getFieldValue("customerInn"),
         executorName: parsed?.supplier?.name ?? form.getFieldValue("executorName"),
         executorInn: parsed?.supplier?.inn ?? form.getFieldValue("executorInn"),
@@ -330,10 +414,15 @@ export function MyDocumentsPage() {
       });
 
       message.success("Файл распознан, поля формы автозаполнены");
+      setParsingProgress(100);
     } catch {
       message.error("Не удалось распознать файл");
     } finally {
-      setIsParsingFile(false);
+      window.clearInterval(progressTimer);
+      window.setTimeout(() => {
+        setIsParsingFile(false);
+        setParsingProgress(0);
+      }, 350);
       event.target.value = "";
     }
   };
@@ -400,6 +489,20 @@ export function MyDocumentsPage() {
     };
 
   const columns: ColumnsType<DocumentRow> = [
+    {
+      title: "",
+      dataIndex: "id",
+      key: "attach",
+      width: 48,
+      render: (_: unknown, row: DocumentRow) => (
+        <Button
+          type="text"
+          icon={<PaperClipOutlined />}
+          aria-label={`Открыть вложения документа ${row.id}`}
+          onClick={() => openAttachmentsPicker(row.id)}
+        />
+      )
+    },
     { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id, sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.id, b.id) },
     {
       title: "Тип",
@@ -475,7 +578,7 @@ export function MyDocumentsPage() {
         if (!isMobile) {
           return (
             <Space wrap size={[4, 4]} className="table-actions-cell">
-              <Button type="link" onClick={() => navigate(`/documents/${row.id}`)}>
+              <Button type="link" onClick={() => { markViewed(row.id); navigate(`/documents/${row.id}`); }}>
                 Открыть
               </Button>
               {row.status === "Загружен" || row.status === "На доработке" ? (
@@ -520,7 +623,7 @@ export function MyDocumentsPage() {
         }
 
         const items: MenuProps["items"] = [
-          { key: "open", label: "Открыть", onClick: () => navigate(`/documents/${row.id}`) }
+          { key: "open", label: "Открыть", onClick: () => { markViewed(row.id); navigate(`/documents/${row.id}`); } }
         ];
         if (row.status === "Загружен" || row.status === "На доработке") {
           items.push(
@@ -730,6 +833,7 @@ export function MyDocumentsPage() {
             tableLayout="fixed"
             scroll={{ x: 1380 }}
             pagination={{ pageSize: 8 }}
+            rowClassName={(record) => (!viewedDocIds.includes(record.id) ? "doc-row-unread" : "")}
             locale={{
               emptyText: (
                 <AppEmptyState
@@ -763,6 +867,28 @@ export function MyDocumentsPage() {
         onSubmit={handleSubmitForApproval}
       />
       <Modal
+        title="Открыть прикрепленный документ"
+        open={attachmentsPickerOpen}
+        onCancel={() => setAttachmentsPickerOpen(false)}
+        onOk={() => {
+          if (selectedAttachmentUrl) window.open(selectedAttachmentUrl, "_blank", "noopener,noreferrer");
+        }}
+        okButtonProps={{ disabled: !selectedAttachmentUrl }}
+        okText="Открыть"
+      >
+        <Select
+          style={{ width: "100%" }}
+          loading={isLoadingPickedAttachments}
+          placeholder="Выберите файл"
+          value={selectedAttachmentUrl ?? undefined}
+          onChange={(value) => setSelectedAttachmentUrl(value)}
+          options={pickedAttachments.map((item) => ({
+            value: item.url,
+            label: `${item.originalName} (${item.uploadedAt})`
+          }))}
+        />
+      </Modal>
+      <Modal
         title={editingDocumentId ? "Редактировать документ" : "Создать документ"}
         open={isModalOpen}
         onOk={handleModalOk}
@@ -771,7 +897,7 @@ export function MyDocumentsPage() {
         width={760}
       >
         <Space style={{ marginBottom: 12 }}>
-          <Button onClick={handlePickFile} loading={isParsingFile}>
+          <Button onClick={handlePickFile} disabled={isParsingFile}>
             Загрузить PDF/DOCX для автозаполнения
           </Button>
           <input
@@ -782,6 +908,20 @@ export function MyDocumentsPage() {
             accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,image/webp"
           />
         </Space>
+        {isParsingFile ? (
+          <div style={{ marginBottom: 12 }}>
+            <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>
+              Идет загрузка и распознавание документа...
+            </Typography.Text>
+            <Progress
+              percent={parsingProgress}
+              showInfo={false}
+              strokeColor={{ from: "#73d13d", to: "#389e0d" }}
+              trailColor="#f0f5f0"
+              status="active"
+            />
+          </div>
+        ) : null}
         <Form form={form} layout="vertical">
           {isPlatformAdmin ? (
             <Form.Item
@@ -811,7 +951,7 @@ export function MyDocumentsPage() {
           <Form.Item name="date" label="Дата" rules={[{ required: true, message: "Укажите дату (YYYY-MM-DD)" }]}>
             <Input placeholder="YYYY-MM-DD" />
           </Form.Item>
-          <Form.Item name="customerName" label="Наименование заказчика" rules={[{ required: true, message: "Укажите заказчика" }]}>
+          <Form.Item name="customerName" label="Заказчик/Плательщик" rules={[{ required: true, message: "Укажите заказчика или плательщика" }]}>
             <Input />
           </Form.Item>
           <Form.Item name="customerInn" label="ИНН заказчика" rules={[{ required: true, message: "Укажите ИНН заказчика" }]}>
@@ -833,6 +973,20 @@ export function MyDocumentsPage() {
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
+        {!editingDocumentId ? (
+          <Button
+            style={{ marginTop: 12 }}
+            type="primary"
+            ghost
+            onClick={async () => {
+              const values = await form.validateFields();
+              setSubmitAfterSave(true);
+              await saveDocumentMutation.mutateAsync(values);
+            }}
+          >
+            Отправить на согласование
+          </Button>
+        ) : null}
       </Modal>
     </div>
   );

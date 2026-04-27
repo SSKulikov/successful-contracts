@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined, RedoOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Checkbox, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -142,22 +142,6 @@ export function AdminPanelPage() {
       message.error(msg ?? "Не удалось сохранить изменения");
     }
   });
-  const resetEmployeePasswordMutation = useMutation({
-    mutationFn: adminApi.resetEmployeePassword,
-    onSuccess: (data) => {
-      message.success("Пароль сброшен");
-      if (data?.oneTimePassword) {
-        message.info(`Новый одноразовый пароль: ${data.oneTimePassword}`);
-      }
-    },
-    onError: (err: unknown) => {
-      const msg =
-        err && typeof err === "object" && "response" in err && err.response && typeof err.response === "object"
-          ? (err.response as { data?: { message?: string } }).data?.message
-          : undefined;
-      message.error(msg ?? "Не удалось сбросить пароль");
-    }
-  });
   const createRouteMutation = useMutation({
     mutationFn: adminApi.createRoute,
     onSuccess: () => {
@@ -251,26 +235,6 @@ export function AdminPanelPage() {
       message.error(msg ?? "Не удалось назначить администратора");
     }
   });
-  const deleteCompanyMutation = useMutation({
-    mutationFn: adminApi.deleteCompany,
-    onSuccess: () => {
-      message.success("Компания удалена");
-      queryClient.invalidateQueries({ queryKey: ["admin-companies"] });
-      queryClient.invalidateQueries({ queryKey: ["admin-employees"] });
-    },
-    onError: () => message.error("Не удалось удалить компанию")
-  });
-  const resetCompanyAdminMutation = useMutation({
-    mutationFn: adminApi.resetCompanyAdmin,
-    onSuccess: (data) => {
-      message.success("Сброс учётной записи администратора выполнен");
-      if (data?.oneTimePassword) {
-        message.info(`Новый одноразовый пароль: ${data.oneTimePassword}`);
-      }
-    },
-    onError: () => message.error("Не удалось выполнить сброс")
-  });
-
   const employeeColumns: ColumnsType<EmployeeRow> = [
     { title: "ФИО", dataIndex: "fullName", key: "fullName" },
     { title: "Email", dataIndex: "email", key: "email", width: 220 },
@@ -319,23 +283,6 @@ export function AdminPanelPage() {
           </Button>
           <Button
             type="link"
-            icon={<RedoOutlined />}
-            disabled={Boolean(record.deletedAt)}
-            loading={
-              (resetEmployeePasswordMutation.isPending &&
-                resetEmployeePasswordMutation.variables === record.key) ||
-              isSingleFlight(`reset-employee-password-${record.key}`)
-            }
-            onClick={() =>
-              void runSingleFlight(`reset-employee-password-${record.key}`, () =>
-                resetEmployeePasswordMutation.mutateAsync(record.key)
-              )
-            }
-          >
-            Сбросить пароль
-          </Button>
-          <Button
-            type="link"
             danger
             loading={
               (deleteEmployeeMutation.isPending && deleteEmployeeMutation.variables === record.key) ||
@@ -366,67 +313,7 @@ export function AdminPanelPage() {
     { title: "Компания", dataIndex: "companyName", key: "companyName" },
     { title: "ИНН компании", dataIndex: "inn", key: "inn", width: 160 },
     { title: "Имя администратора", dataIndex: "adminFullName", key: "adminFullName", width: 220 },
-    {
-      title: "Действия",
-      key: "actions",
-      width: 280,
-      render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            onClick={() => {
-              setEditingCompany(record);
-              companyEditForm.setFieldsValue({
-                companyName: record.companyName,
-                inn: record.inn,
-                adminFullName: record.adminFullName,
-                adminEmail: ""
-              });
-              setCompanyEditOpen(true);
-            }}
-          >
-            Редактировать
-          </Button>
-          <Button
-            type="link"
-            icon={<RedoOutlined />}
-            loading={
-              (resetCompanyAdminMutation.isPending && resetCompanyAdminMutation.variables === record.key) ||
-              isSingleFlight(`reset-company-admin-${record.key}`)
-            }
-            onClick={() =>
-              void runSingleFlight(`reset-company-admin-${record.key}`, () =>
-                resetCompanyAdminMutation.mutateAsync(record.key)
-              )
-            }
-          >
-            Сбросить сотрудника
-          </Button>
-          <Button
-            type="link"
-            danger
-            loading={
-              (deleteCompanyMutation.isPending && deleteCompanyMutation.variables === record.key) ||
-              isSingleFlight(`delete-company-${record.key}`)
-            }
-            onClick={() =>
-              confirmDangerAction({
-                title: "Удалить компанию из списка?",
-                content: "Данные компании и связанные настройки будут недоступны.",
-                okText: "Удалить",
-                onOk: async () => {
-                  await runSingleFlight(`delete-company-${record.key}`, () =>
-                    deleteCompanyMutation.mutateAsync(record.key)
-                  );
-                }
-              })
-            }
-          >
-            Удалить
-          </Button>
-        </Space>
-      )
-    }
+    { title: "Почта администратора", dataIndex: "email", key: "email", width: 240 }
   ];
 
   const routeColumns: ColumnsType<RouteRow> = [
@@ -666,7 +553,7 @@ export function AdminPanelPage() {
 
   return (
     <div className="page-shell">
-      <PageHeader title="Админ-панель" subtitle="Управление сотрудниками, маршрутами согласования и компаниями." />
+      <PageHeader title="Управление компаниями" subtitle="Управление сотрудниками, маршрутами согласования и компаниями." />
       <Typography.Paragraph type="secondary" style={{ marginTop: -6, marginBottom: 16 }}>
         Рекомендуемый порядок: зарегистрируйте компанию → добавьте сотрудников и роли → настройте маршрут согласования.
       </Typography.Paragraph>
@@ -967,25 +854,9 @@ export function AdminPanelPage() {
                           ]}
                         />
                       </Form.Item>
-                      <Form.Item
-                        label="Одноразовый пароль"
-                        name="oneTimePassword"
-                        tooltip="Сотрудник использует этот пароль для первого входа."
-                        style={{ minWidth: 260 }}
-                      >
+                      <Form.Item label="Одноразовый пароль" name="oneTimePassword" tooltip="Сотрудник использует этот пароль для первого входа." style={{ minWidth: 260 }}>
                         <Input value={generatedOneTimePassword} readOnly />
                       </Form.Item>
-                    </Space>
-                    <Space style={{ marginBottom: 12 }}>
-                      <Button
-                        onClick={() => {
-                          const nextPassword = generateOneTimePassword();
-                          setGeneratedOneTimePassword(nextPassword);
-                          employeeForm.setFieldValue("oneTimePassword", nextPassword);
-                        }}
-                      >
-                        Сгенерировать заново
-                      </Button>
                     </Space>
                     {lastIssuedPassword && (
                       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
@@ -1261,6 +1132,15 @@ export function AdminPanelPage() {
                   pagination={{ pageSize: 8 }}
                   locale={{ emptyText: "Нет зарегистрированных компаний — добавьте компанию во вкладке «Регистрация компании»" }}
                 />
+              </Card>
+            )
+          },
+          {
+            key: "payment-status",
+            label: "Статус оплаты",
+            children: (
+              <Card title="Статус оплаты">
+                <Typography.Text type="secondary">Данные по оплате будут добавлены позже.</Typography.Text>
               </Card>
             )
           }

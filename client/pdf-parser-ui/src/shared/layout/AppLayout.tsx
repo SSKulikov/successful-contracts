@@ -27,24 +27,17 @@ export function AppLayout() {
     () => [
       {
         type: "group" as const,
-        label: "Документы",
-        children: [
-          { key: "/my-documents", label: "Мои документы" },
-          { key: "/my-approvals", label: "В работе" }
-        ]
-      },
-      {
-        type: "group" as const,
         label: "Управление",
         children: [
           { key: "/profile", label: "Профиль" },
-          { key: "/admin-panel", label: "Админ панель" }
+          { key: "/admin-panel", label: "Управление компаниями" }
         ]
       }
     ],
     []
   );
 
+  const user = getStoredUserProfile();
   const tenantMenuItems = useMemo(
     () => [
       {
@@ -55,16 +48,24 @@ export function AppLayout() {
           { key: "/my-approvals", label: "В работе" }
         ]
       },
+      ...(user?.role === "admin" && user.companyId != null
+        ? [
+            {
+              type: "group" as const,
+              label: "Управление",
+              children: [{ key: "/admin-panel", label: "Управление компанией" }]
+            }
+          ]
+        : []),
       {
         type: "group" as const,
         label: "Профиль",
         children: [{ key: "/profile", label: "Профиль" }]
       }
     ],
-    []
+    [user?.role, user?.companyId]
   );
 
-  const user = getStoredUserProfile();
   const mustChangePassword = Boolean(user?.mustChangePassword);
   const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
   const gatedMenuItems = mustChangePassword
@@ -81,7 +82,7 @@ export function AppLayout() {
     "/documents": "Карточка документа",
     "/my-approvals": "В работе",
     "/profile": "Профиль",
-    "/admin-panel": "Админ панель",
+    "/admin-panel": user && isPlatformAdminUser(user) ? "Управление компаниями" : "Управление компанией",
     "/workspace": "Рабочее место"
   };
   const breadcrumbLabel =

@@ -1,6 +1,6 @@
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Timeline, Typography, message } from "antd";
+import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Table, Tabs, Timeline, Typography, Upload, message } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
@@ -61,6 +61,7 @@ export function DocumentDetailsPage() {
   const [editForm] = Form.useForm();
   const [submitRouteModalOpen, setSubmitRouteModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [attachmentFileList, setAttachmentFileList] = useState<File[]>([]);
   const editDocumentButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const me = getStoredUserProfile();
@@ -155,6 +156,15 @@ export function DocumentDetailsPage() {
       message.success("Документ обновлен");
       setEditModalOpen(false);
       invalidateAll();
+    },
+    onError: mutationError
+  });
+  const uploadAttachmentMutation = useMutation({
+    mutationFn: async (file: File) => documentsApi.uploadDocumentAttachment(id, file),
+    onSuccess: () => {
+      message.success("Файл прикреплен");
+      queryClient.invalidateQueries({ queryKey: ["document-details", id] });
+      setAttachmentFileList([]);
     },
     onError: mutationError
   });
@@ -436,6 +446,65 @@ export function DocumentDetailsPage() {
         </Descriptions>
       </Card>
 
+      <Card className="doc-detail-card" loading={isLoading && !isError}>
+        <Tabs
+          items={[
+            {
+              key: "attachments",
+              label: "Прикрепленные документы",
+              children: (
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <Upload
+                    beforeUpload={(file) => {
+                      setAttachmentFileList([file]);
+                      return false;
+                    }}
+                    fileList={attachmentFileList as never[]}
+                    onRemove={() => {
+                      setAttachmentFileList([]);
+                      return true;
+                    }}
+                    maxCount={1}
+                  >
+                    <Button>Выбрать файл</Button>
+                  </Upload>
+                  <Button
+                    type="primary"
+                    disabled={!attachmentFileList[0]}
+                    loading={uploadAttachmentMutation.isPending}
+                    onClick={() => {
+                      if (attachmentFileList[0]) uploadAttachmentMutation.mutate(attachmentFileList[0]);
+                    }}
+                  >
+                    Загрузить вложение
+                  </Button>
+                  <Table
+                    rowKey="id"
+                    dataSource={data?.attachments ?? []}
+                    pagination={false}
+                    columns={[
+                      { title: "Документ", dataIndex: "originalName", key: "originalName" },
+                      { title: "Дата загрузки", dataIndex: "uploadedAt", key: "uploadedAt", width: 180 },
+                      { title: "Дата изменения", dataIndex: "updatedAt", key: "updatedAt", width: 180 },
+                      {
+                        title: "Открыть",
+                        key: "open",
+                        width: 120,
+                        render: (_, row: { url: string }) => (
+                          <Button type="link" onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}>
+                            Открыть
+                          </Button>
+                        )
+                      }
+                    ]}
+                  />
+                </Space>
+              )
+            }
+          ]}
+        />
+      </Card>
+
       <Card
         title="История действий"
         className="doc-detail-card doc-detail-history-card"
@@ -447,17 +516,16 @@ export function DocumentDetailsPage() {
           </Typography.Paragraph>
         ) : (
           <Timeline
-            mode="left"
             items={(data?.history ?? []).map((item) => ({
               key: item.id,
               color: timelineColor(item.variant),
-              label: (
-                <span className="doc-detail-timeline__meta">
+              children: (
+                <span className="doc-detail-timeline__entry">
                   <span className="doc-detail-timeline__date">{item.date}</span>
                   <span className="doc-detail-timeline__author">{item.author}</span>
+                  <span className="doc-detail-timeline__action">{item.action}</span>
                 </span>
-              ),
-              children: <span className="doc-detail-timeline__action">{item.action}</span>
+              )
             }))}
           />
         )}

@@ -21,7 +21,7 @@ describe("LandingPage", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Запустить в компании" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Начать работать" })[0]);
     expect(navigateMock).toHaveBeenCalledWith("/auth");
   });
 });
