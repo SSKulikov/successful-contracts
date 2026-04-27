@@ -1,0 +1,282 @@
+{
+  "gigachat": [
+    {
+      "provider": "gigachat",
+      "docName": "20112024_УК_ООО_НТ_Договор_Натуралика_УК_Событийка.pdf",
+      "ok": true,
+      "latencySec": 35.973,
+      "parsed": {
+        "supplier.inn": 7726706014,
+        "customer.inn": 7708396730,
+        "contract_number": "20112024-YK-OOO-HT",
+        "contract_date": null,
+        "contract_sum": 20750000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": null,
+        "contract_sum": true
+      },
+      "checkedCount": 4,
+      "evidenceTrue": 4,
+      "evidenceRate": 1
+    },
+    {
+      "provider": "gigachat",
+      "docName": "Воронин_21300.pdf",
+      "ok": true,
+      "latencySec": 7.185,
+      "parsed": {
+        "supplier.inn": 500712542751,
+        "customer.inn": 9721026330,
+        "contract_number": "Счет на оплату № 5 от 21 мая 2024 г.",
+        "contract_date": null,
+        "contract_sum": 21300
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": null,
+        "contract_sum": true
+      },
+      "checkedCount": 4,
+      "evidenceTrue": 4,
+      "evidenceRate": 1
+    },
+    {
+      "provider": "gigachat",
+      "docName": "Договор арт техно 26.docx",
+      "ok": true,
+      "latencySec": 22.741,
+      "parsed": {
+        "supplier.inn": 7725405423,
+        "customer.inn": 9704055669,
+        "contract_number": "ТХ-20240717",
+        "contract_date": "2024-07-17",
+        "contract_sum": 26000000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": true,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 5,
+      "evidenceRate": 1
+    },
+    {
+      "provider": "gigachat",
+      "docName": "Договор подряда Сириус Мезон.docx",
+      "ok": true,
+      "latencySec": 10.181,
+      "parsed": {
+        "supplier.inn": 7817116862,
+        "customer.inn": 7730558880,
+        "contract_number": "МСЗ-170524",
+        "contract_date": "2024-05-17",
+        "contract_sum": 8645540
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    },
+    {
+      "provider": "gigachat",
+      "docName": "Договор Сириус Империя 26 млн.docx",
+      "ok": true,
+      "latencySec": 22.653,
+      "parsed": {
+        "supplier.inn": 7743369087,
+        "customer.inn": 7730558880,
+        "contract_number": "ГИ-010072024",
+        "contract_date": "2024-01-06",
+        "contract_sum": 26000000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": false,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 3,
+      "evidenceRate": 0.6
+    },
+    {
+      "provider": "gigachat",
+      "docName": "ДОГОВОР УК_Аврора_Декорирование.docx",
+      "ok": true,
+      "latencySec": 5.352,
+      "parsed": {
+        "supplier.inn": 7840512825,
+        "customer.inn": 7708396730,
+        "contract_number": "АА-УК-15112024",
+        "contract_date": "2024-11-15",
+        "contract_sum": 6620000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    }
+  ],
+  "yagpt": [
+    {
+      "provider": "yagpt",
+      "docName": "20112024_УК_ООО_НТ_Договор_Натуралика_УК_Событийка.pdf",
+      "ok": true,
+      "latencySec": 59.39,
+      "parsed": {
+        "supplier.inn": 7708396730,
+        "customer.inn": 7726706014,
+        "contract_number": "20112024-YK-OOO-HT",
+        "contract_date": "2024-11-20",
+        "contract_sum": 20750000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    },
+    {
+      "provider": "yagpt",
+      "docName": "Воронин_21300.pdf",
+      "ok": true,
+      "latencySec": 11.564,
+      "parsed": {
+        "supplier.inn": 500712542751,
+        "customer.inn": 9721026330,
+        "contract_number": null,
+        "contract_date": "2024-05-21",
+        "contract_sum": 21300
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": null,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 4,
+      "evidenceTrue": 3,
+      "evidenceRate": 0.75
+    },
+    {
+      "provider": "yagpt",
+      "docName": "Договор арт техно 26.docx",
+      "ok": true,
+      "latencySec": 34.919,
+      "parsed": {
+        "supplier.inn": 9704055669,
+        "customer.inn": 7725405423,
+        "contract_number": "ТХ-20240717",
+        "contract_date": "2024-07-17",
+        "contract_sum": 26000000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": true,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 5,
+      "evidenceRate": 1
+    },
+    {
+      "provider": "yagpt",
+      "docName": "Договор подряда Сириус Мезон.docx",
+      "ok": true,
+      "latencySec": 29.629,
+      "parsed": {
+        "supplier.inn": 7817116862,
+        "customer.inn": 7730558880,
+        "contract_number": "МСЗ-170524",
+        "contract_date": "2024-05-17",
+        "contract_sum": 8645540
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    },
+    {
+      "provider": "yagpt",
+      "docName": "Договор Сириус Империя 26 млн.docx",
+      "ok": true,
+      "latencySec": 34.974,
+      "parsed": {
+        "supplier.inn": 7743369087,
+        "customer.inn": 7730558880,
+        "contract_number": "ГКИ-010072024",
+        "contract_date": "2024-07-01",
+        "contract_sum": 26000000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    },
+    {
+      "provider": "yagpt",
+      "docName": "ДОГОВОР УК_Аврора_Декорирование.docx",
+      "ok": true,
+      "latencySec": 13.463,
+      "parsed": {
+        "supplier.inn": 7840512825,
+        "customer.inn": 7708396730,
+        "contract_number": "АА-УК-15112024",
+        "contract_date": "2024-11-15",
+        "contract_sum": 6620000
+      },
+      "evidence": {
+        "supplier.inn": true,
+        "customer.inn": true,
+        "contract_number": true,
+        "contract_date": false,
+        "contract_sum": true
+      },
+      "checkedCount": 5,
+      "evidenceTrue": 4,
+      "evidenceRate": 0.8
+    }
+  ]
+}

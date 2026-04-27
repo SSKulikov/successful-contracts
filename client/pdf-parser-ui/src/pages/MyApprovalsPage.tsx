@@ -1,6 +1,6 @@
 import { CheckOutlined, CloseOutlined, MoreOutlined, PaperClipOutlined, UndoOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Dropdown, Grid, Input, Modal, Segmented, Select, Space, Table, Typography, message } from "antd";
+import { Button, Card, Dropdown, Grid, Input, Modal, Select, Space, Table, Typography, message } from "antd";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -39,8 +39,6 @@ export function MyApprovalsPage() {
   const isMobile = !screens.md;
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
-  const [tableSize, setTableSize] = useState<"small" | "middle">("small");
-  const [tableVersion, setTableVersion] = useState(0);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     id: 110,
     type: 130,
@@ -177,22 +175,6 @@ export function MyApprovalsPage() {
       left.id.localeCompare(right.id, "ru", { numeric: true, sensitivity: "base" })
     );
   }, [data?.items, search]);
-  const resetColumnWidths = () => {
-    const defaults = {
-      id: 110,
-      type: 130,
-      title: 240,
-      initiator: 190,
-      amount: 130,
-      waitingDays: 130,
-      currentStep: 170,
-      receivedAt: 160,
-      priority: 130,
-      actions: 360
-    };
-    setColumnWidths(defaults);
-    localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(defaults));
-  };
   const resetFilters = () => {
     setSearch("");
     setTypeFilter(undefined);
@@ -365,21 +347,6 @@ export function MyApprovalsPage() {
       <PageHeader
         title="В работе"
         subtitle="Документы, где от вас ожидается решение по этапу согласования."
-        actions={
-          <Space wrap>
-            <Segmented
-              size="small"
-              value={tableSize}
-              onChange={(value) => setTableSize(value as "small" | "middle")}
-              options={[
-                { label: "Компактно", value: "small" },
-                { label: "Стандарт", value: "middle" }
-              ]}
-            />
-            <Button onClick={resetColumnWidths}>Сбросить ширины</Button>
-            <Button onClick={() => setTableVersion((v) => v + 1)}>Сбросить сортировку</Button>
-          </Space>
-        }
       />
 
       <MockApiBanner />
@@ -422,7 +389,6 @@ export function MyApprovalsPage() {
           </Space>
 
           <Table
-            key={tableVersion}
             className="app-table my-approvals-table"
             rowKey="id"
             components={{
@@ -440,17 +406,18 @@ export function MyApprovalsPage() {
             tableLayout="fixed"
             scroll={{ x: 1450 }}
             loading={isLoading || actionInProgress}
-            size={tableSize}
+            size="small"
             locale={{
               emptyText: (
                 <AppEmptyState
                   description="Нет задач на согласование"
                   extra={
-                    <Space>
-                      <Button onClick={resetFilters}>Сбросить фильтры</Button>
-                      <Button onClick={() => navigate("/my-documents")}>Перейти к документам</Button>
-                      {isPlatformAdmin ? <Button onClick={() => navigate("/admin-panel")}>Перейти в админ-панель</Button> : null}
-                    </Space>
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                      <Space wrap size={8}>
+                        <Button onClick={() => navigate("/my-documents")}>Перейти к документам</Button>
+                        {isPlatformAdmin ? <Button onClick={() => navigate("/admin-panel")}>Перейти в админ-панель</Button> : null}
+                      </Space>
+                    </div>
                   }
                 />
               )

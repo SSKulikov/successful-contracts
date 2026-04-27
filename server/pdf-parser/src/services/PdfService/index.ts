@@ -106,7 +106,7 @@ export class PdfService {
     logger.info(`Распознанный текст сохранён в файл: ${textFilePath}`);
 
     // Удаляем папку с изображениями
-    fs.rmSync(outputDir, { recursive: true, force: true });
+    // fs.rmSync(outputDir, { recursive: true, force: true });
     logger.info(`Удалена папка с изображениями: ${outputDir}`);
 
     return textFilePath;

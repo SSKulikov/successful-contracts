@@ -352,9 +352,15 @@ export function DocumentDetailsPage() {
           ) : null}
           {canApproveInCard ? (
             <>
-              <Button type="primary" disabled={actionInProgress || !data?.activeTaskId} onClick={() => approveMutation.mutate(data.activeTaskId!)}>
-                Согласовать
-              </Button>
+              {!(!isPlatformAdmin && canWithdraw) ? (
+                <Button
+                  type="primary"
+                  disabled={actionInProgress || !data?.activeTaskId}
+                  onClick={() => approveMutation.mutate(data.activeTaskId!)}
+                >
+                  Согласовать
+                </Button>
+              ) : null}
               <Button disabled={actionInProgress || !data?.activeTaskId} onClick={handleRevise}>
                 На доработку
               </Button>
@@ -364,21 +370,32 @@ export function DocumentDetailsPage() {
             </>
           ) : null}
           {canWithdraw ? (
-            <Button
-              type={actionPrimary ? "default" : "primary"}
-              disabled={actionInProgress}
-              onClick={() =>
-                Modal.confirm({
-                  title: "Отозвать документ с согласования?",
-                  content: "Документ вернется в статус «Загружен».",
-                  okText: "Отозвать",
-                  cancelText: "Отмена",
-                  onOk: () => withdrawMutation.mutateAsync(id)
-                })
-              }
-            >
-              Отозвать с согласования
-            </Button>
+            <>
+              {!isPlatformAdmin && canApproveInCard ? (
+                <Button
+                  type="primary"
+                  disabled={actionInProgress || !data?.activeTaskId}
+                  onClick={() => approveMutation.mutate(data.activeTaskId!)}
+                >
+                  Согласовать
+                </Button>
+              ) : null}
+              <Button
+                type={actionPrimary ? "default" : "primary"}
+                disabled={actionInProgress}
+                onClick={() =>
+                  Modal.confirm({
+                    title: "Отозвать документ с согласования?",
+                    content: "Документ вернется в статус «Загружен».",
+                    okText: "Отозвать",
+                    cancelText: "Отмена",
+                    onOk: () => withdrawMutation.mutateAsync(id)
+                  })
+                }
+              >
+                Отозвать с согласования
+              </Button>
+            </>
           ) : null}
           {canDelete ? (
             <Button

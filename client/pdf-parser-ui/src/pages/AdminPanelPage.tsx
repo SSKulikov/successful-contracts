@@ -858,19 +858,20 @@ export function AdminPanelPage() {
                         <Input value={generatedOneTimePassword} readOnly />
                       </Form.Item>
                     </Space>
-                    {lastIssuedPassword && (
-                      <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-                        Пароль последнего созданного сотрудника: {lastIssuedPassword}
-                      </Typography.Text>
-                    )}
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
                       loading={createEmployeeMutation.isPending}
                       onClick={handleCreateEmployee}
+                      style={{ marginBottom: 12 }}
                     >
                       Создать сотрудника
                     </Button>
+                    {lastIssuedPassword && (
+                      <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+                        Пароль последнего созданного сотрудника: {lastIssuedPassword}
+                      </Typography.Text>
+                    )}
                   </Form>
                 </Card>
 
