@@ -3,10 +3,19 @@ import Tesseract from "tesseract.js";
 import * as fs from "fs";
 import path from "path";
 import { PDFDocument } from "pdf-lib";
+import { PDFParse } from "pdf-parse";
 import { logger } from "../../utils/logger"; // Подключаем pdf-lib
 
 export class PdfService {
   constructor() {}
+
+  private isReadableExtractedText(text: string): boolean {
+    const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
+    if (normalized.length < 120) return false;
+    const letters = normalized.match(/[A-Za-zА-Яа-яЁё]/g)?.length ?? 0;
+    const readableChars = normalized.match(/[A-Za-zА-Яа-яЁё0-9.,:;()\-/"'№ ]/g)?.length ?? 0;
+    return letters >= 80 && readableChars / normalized.length >= 0.7;
+  }
 
   async convertPdf(pdfName: string) {
     const pdfPath = path.join(
@@ -33,12 +42,10 @@ export class PdfService {
     }
 
     const options = {
-      density: 300, // Хорошее качество
+      density: 400, // Выше DPI для лучшего OCR на сканах
       savePath: outputDir, // Папка для картинок
       format: "png",
-      width: 1920,
-      height: 1080,
-      preserveAspectRatio: true,
+      preserveAspectRatio: true
     };
 
     const converter = fromPath(pdfPath, options);
@@ -49,6 +56,21 @@ export class PdfService {
     const totalPages = pdfDoc.getPages().length;
 
     logger.info(`Всего страниц в PDF: ${totalPages}`);
+
+    try {
+      const parser = new PDFParse({ data: pdfData });
+      const parsed = await parser.getText();
+      await parser.destroy();
+      const directText = String(parsed?.text ?? "").trim();
+      if (this.isReadableExtractedText(directText)) {
+        fs.writeFileSync(textFilePath, directText, "utf8");
+        logger.info(`Текст извлечён напрямую из PDF: ${textFilePath}`);
+        return textFilePath;
+      }
+      logger.info("Встроенный текст PDF пустой/нечитаемый, запускается OCR");
+    } catch (error) {
+      logger.warn(`Не удалось извлечь встроенный текст PDF, запускается OCR: ${error}`);
+    }
 
     // Массив для обработки всех страниц параллельно
     const pagePromises = Array.from({ length: totalPages }, (_, index) => {
@@ -63,10 +85,7 @@ export class PdfService {
             );
 
             // Распознаем текст с изображения
-            const { data } = await Tesseract.recognize(
-              pageResult.path,
-              "rus+eng"
-            );
+            const { data } = await Tesseract.recognize(pageResult.path, "rus+eng");
             logger.info(`Текст страницы ${page} распознан`);
 
             resolve({ page, text: data.text });

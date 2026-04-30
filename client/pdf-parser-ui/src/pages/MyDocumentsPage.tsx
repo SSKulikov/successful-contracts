@@ -40,11 +40,46 @@ function normalizeDetectedDocumentType(raw: unknown): string | undefined {
   const value = String(raw ?? "").trim();
   if (!value) return undefined;
   const lower = value.toLowerCase();
-  if (lower.includes("упд")) return "УПД";
-  if (lower.includes("счет")) return "Счет на оплату";
-  if (lower.includes("акт")) return "Акт";
-  if (lower.includes("наклад")) return "Накладная";
-  if (lower.includes("договор")) return "Договор";
+  const normalized = lower.replace(/ё/g, "е");
+  const hasInvoiceFacture =
+    normalized.includes("счет-фактур") || /счет\w*\s+фактур/.test(normalized);
+  const hasInvoicePayment =
+    /счет\s*(на)?\s*оплат/.test(normalized) || normalized.includes("инвойс");
+  const hasUniversalTransferDocPhrase =
+    /универсальн\w*[\s.,:;/-]*передаточн\w*[\s.,:;/-]*документ/.test(normalized) ||
+    (normalized.includes("универсальн") &&
+      normalized.includes("передаточн") &&
+      normalized.includes("документ"));
+  const hasUpD =
+    normalized.includes("упд") ||
+    hasUniversalTransferDocPhrase ||
+    (hasInvoiceFacture && normalized.includes("накладн")) ||
+    /\bстатус\s*[:\-]?\s*[12]\b/.test(normalized);
+  const hasInvoice = hasInvoiceFacture || hasInvoicePayment;
+  const hasNakladn =
+    /товарн\w*\s+накладн/.test(normalized) ||
+    /\bторг[\s-]*12\b/.test(normalized) ||
+    (normalized.includes("накладн") && !hasUpD && !hasInvoice);
+  const hasAct =
+    /акт\w*\s+(выполненн\w*\s+работ|оказанн\w*\s+услуг|прием\w*)/.test(normalized) ||
+    normalized.includes("акт");
+  const hasContract =
+    /(?:^|\n|\s)договор(?:\s|$|№|n)/.test(normalized) ||
+    /договор\w*\s*(поставк|оказан|подряд|аренд|купли[-\s]*продаж)/.test(normalized);
+
+  if (hasUpD) {
+    return "УПД";
+  }
+  if (hasInvoice) {
+    return "Счет на оплату";
+  }
+  if (hasNakladn) {
+    return "Накладная";
+  }
+  if (hasAct) {
+    return "Акт";
+  }
+  if (hasContract && !hasInvoice && !hasNakladn) return "Договор";
   return undefined;
 }
 
