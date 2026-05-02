@@ -28,6 +28,28 @@ export class GigaChatService {
 
     async main() {}
 
+    private parseModelJson(raw: string) {
+        const text = String(raw ?? "").trim();
+        if (!text) {
+            throw new Error("Пустой ответ от модели");
+        }
+
+        const unwrapped = text.replace(/```json|```/gi, "").trim();
+        const jsonStart = unwrapped.indexOf("{");
+        const jsonEnd = unwrapped.lastIndexOf("}");
+
+        if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+            throw new Error("В ответе модели не найден валидный JSON-объект");
+        }
+
+        const candidate = unwrapped.slice(jsonStart, jsonEnd + 1).trim();
+        if (!candidate) {
+            throw new Error("В ответе модели найден пустой JSON-кандидат");
+        }
+
+        return JSON.parse(candidate);
+    }
+
     async makeRequest(text: string) {
         let dataResult = null;
         let attempt = 0;
@@ -47,11 +69,7 @@ export class GigaChatService {
 
                 const raw = result?.choices[0]?.message.content;
                 if (!raw) throw new Error("Не пришло ответа от ИИ");
-
-                const jsonStart = raw.indexOf("{");
-                const jsonEnd = raw.lastIndexOf("}");
-                const cleanRaw = raw.substring(jsonStart, jsonEnd + 1);
-                dataResult = JSON.parse(cleanRaw);
+                dataResult = this.parseModelJson(raw);
                 break; // успешно
             } catch (err: any) {
                 const status = err?.response?.status;
