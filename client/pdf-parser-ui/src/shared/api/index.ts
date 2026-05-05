@@ -1056,6 +1056,10 @@ export const adminApi = {
     const response = await httpClient.post("/company/admin/employees", payload);
     return response.data as { message?: string; oneTimePassword?: string };
   },
+  async resetCompanyAdminEmployeePassword(employeeId: string) {
+    const response = await httpClient.post(`/company/admin/employees/${employeeId}/reset-password`);
+    return response.data as { message?: string; oneTimePassword?: string };
+  },
   async updateCompanyAdminEmployee(
     employeeId: string,
     payload: {

@@ -1390,6 +1390,17 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       variant: mapHistoryVariant(event.event_type)
     }));
 
+    const creatorRows = await prisma.$queryRawUnsafe<Array<{ creator_name: string | null }>>(
+      `
+        SELECT CASE WHEN e.deleted_at IS NOT NULL THEN NULL ELSE e.full_name END AS creator_name
+        FROM employees e
+        WHERE e.id = ?
+        LIMIT 1
+      `,
+      doc.created_by
+    );
+    const initiatorName = creatorRows[0]?.creator_name ?? "Удаленный пользователь";
+
     const canEditFlow = employee.role === "admin" || doc.created_by === employee.id || doc.last_edited_by === employee.id;
     const canWithdrawDocuments = canEditFlow && doc.status === "in_approval";
     const canDeleteDocuments = canEditFlow && doc.status !== "in_approval" && doc.status !== "approved";
@@ -1402,7 +1413,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       type: doc.type,
       title: `${doc.type} №${doc.number_value}`,
       status: mapStatusToRuLabel(doc.status),
-      initiator: doc.customer_name,
+      initiator: initiatorName,
       amount: doc.amount,
       currentStep,
       approvalChain,

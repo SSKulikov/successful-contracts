@@ -449,18 +449,6 @@ export function DocumentDetailsPage() {
           <Descriptions.Item label="Наименование">{fields?.executorName ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="ИНН">{fields?.executorInn ?? "—"}</Descriptions.Item>
         </Descriptions>
-        <Divider plain titlePlacement="start">
-          Служебное
-        </Divider>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="ID">{data?.id ?? "—"}</Descriptions.Item>
-          {data?.companyId != null ? (
-            <Descriptions.Item label="Компания (ID)">{data.companyId}</Descriptions.Item>
-          ) : null}
-          <Descriptions.Item label="Инициатор (контрагент в списке)">{data?.initiator ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Создан">{formatDateTime(data?.createdAt)}</Descriptions.Item>
-          <Descriptions.Item label="Обновлен">{formatDateTime(data?.updatedAt)}</Descriptions.Item>
-        </Descriptions>
       </Card>
 
       <Card className="doc-detail-card" loading={isLoading && !isError}>

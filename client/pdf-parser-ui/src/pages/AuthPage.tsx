@@ -107,9 +107,9 @@ export function AuthPage() {
               children: (
                 <Form form={loginForm} layout="vertical">
                   <Form.Item
-                    label="Email или логин"
+                    label="Email"
                     name="login"
-                    rules={[{ required: true, message: "Введите email или логин" }]}
+                    rules={[{ required: true, message: "Введите email" }]}
                   >
                     <Input placeholder="admin или user@company.ru" />
                   </Form.Item>
