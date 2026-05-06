@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Table, Tabs, Timeline, Typography, Upload, message } from "antd";
 import { useEffect, useRef, useState } from "react";
@@ -185,9 +185,7 @@ export function DocumentDetailsPage() {
   const st = data?.status;
   const canWithdraw =
     data?.canWithdrawDocuments === true || (data?.canWithdrawDocuments === undefined && st === "На согласовании");
-  const canDelete =
-    data?.canDeleteDocuments === true ||
-    (data?.canDeleteDocuments === undefined && (st === "Загружен" || st === "На доработке"));
+  const canDelete = data != null && data.canDeleteDocuments !== false;
   const canSubmit = data?.canSubmitForApproval === true || (data?.canSubmitForApproval === undefined && st === "Загружен");
   const canResubmit =
     data?.canResubmitForApproval === true || (data?.canResubmitForApproval === undefined && st === "На доработке");
@@ -331,9 +329,9 @@ export function DocumentDetailsPage() {
 
         <Divider style={{ margin: "20px 0" }} />
 
-        <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+        <Divider plain titlePlacement="start" style={{ margin: "0 0 12px" }}>
           Действия
-        </Typography.Text>
+        </Divider>
         <Space wrap style={{ marginBottom: 8 }}>
           {data?.canEditDocumentFields ? (
             <Button ref={editDocumentButtonRef} disabled={actionInProgress} onClick={openEditModal}>
@@ -400,7 +398,9 @@ export function DocumentDetailsPage() {
           {canDelete ? (
             <Button
               danger
-              disabled={actionInProgress}
+              icon={<DeleteOutlined />}
+              disabled={actionInProgress || !id}
+              aria-label="Удалить документ"
               onClick={() =>
                 confirmDangerAction({
                   title: "Удалить документ?",
@@ -448,18 +448,6 @@ export function DocumentDetailsPage() {
         <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
           <Descriptions.Item label="Наименование">{fields?.executorName ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="ИНН">{fields?.executorInn ?? "—"}</Descriptions.Item>
-        </Descriptions>
-        <Divider plain titlePlacement="start">
-          Служебное
-        </Divider>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="ID">{data?.id ?? "—"}</Descriptions.Item>
-          {data?.companyId != null ? (
-            <Descriptions.Item label="Компания (ID)">{data.companyId}</Descriptions.Item>
-          ) : null}
-          <Descriptions.Item label="Инициатор (контрагент в списке)">{data?.initiator ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Создан">{formatDateTime(data?.createdAt)}</Descriptions.Item>
-          <Descriptions.Item label="Обновлен">{formatDateTime(data?.updatedAt)}</Descriptions.Item>
         </Descriptions>
       </Card>
 

@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { DeleteOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -44,6 +44,27 @@ export function CompanyManagementPage() {
       queryClient.invalidateQueries({ queryKey: ["company-admin-employees"] });
     }
   });
+  const resetEmployeePassword = useMutation({
+    mutationFn: adminApi.resetCompanyAdminEmployeePassword,
+    onSuccess: (data, _employeeId) => {
+      if (data.oneTimePassword) {
+        setLastIssuedPassword(data.oneTimePassword);
+        message.success("Одноразовый пароль сгенерирован");
+        message.info(`Одноразовый пароль: ${data.oneTimePassword}`);
+      } else {
+        message.success("Пароль сотрудника обновлен");
+      }
+      queryClient.invalidateQueries({ queryKey: ["company-admin-employees"] });
+      queryClient.invalidateQueries({ queryKey: ["users", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["company-profile"] });
+    },
+    onError: () => {
+      message.error("Не удалось сгенерировать одноразовый пароль");
+    }
+  });
   const createRoute = useMutation({
     mutationFn: adminApi.createCompanyRoute,
     onSuccess: () => {
@@ -75,9 +96,14 @@ export function CompanyManagementPage() {
       title: "Действия",
       key: "actions",
       render: (_, row) => (
-        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteEmployee.mutate(row.key)}>
-          Удалить
-        </Button>
+        <Space size={4}>
+          <Button type="link" icon={<KeyOutlined />} loading={resetEmployeePassword.isPending} onClick={() => resetEmployeePassword.mutate(row.key)}>
+            Смена пароля
+          </Button>
+          <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteEmployee.mutate(row.key)}>
+            Удалить
+          </Button>
+        </Space>
       )
     }
   ];
@@ -137,14 +163,15 @@ export function CompanyManagementPage() {
                       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>
                         Сгенерированный одноразовый пароль
                       </Typography.Text>
-                      <Input value={lastIssuedPassword ?? "Появится после создания сотрудника"} readOnly />
+                      <Input value={lastIssuedPassword ?? "Появится после создания сотрудника или смены пароля"} readOnly />
                     </div>
                     {lastIssuedPassword ? (
                       <Alert
                         style={{ marginTop: 12, maxWidth: 520 }}
                         type="info"
                         showIcon
-                        message="Передайте пароль сотруднику для первого входа."
+                        message="Передайте пароль сотруднику для входа."
+                        description="До смены одноразового пароля сотрудником действия в системе будут заблокированы."
                       />
                     ) : null}
                   </Form>

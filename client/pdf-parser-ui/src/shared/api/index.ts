@@ -409,7 +409,7 @@ const mockDocumentDetailsMap: Record<string, DocumentDetails> = {
     currentStep: "Шаг 2 из 3: Мария Соколова",
     approvalChain: ["1. Иван Петров", "2. Мария Соколова", "3. Админ компании — Иван Петров"],
     canWithdrawDocuments: true,
-    canDeleteDocuments: false,
+    canDeleteDocuments: true,
     canSubmitForApproval: false,
     canResubmitForApproval: false,
     canApproveCurrentStep: true,
@@ -680,7 +680,7 @@ export const documentsApi = {
           amount: "-",
           currentStep: "Не назначен",
           canWithdrawDocuments: true,
-          canDeleteDocuments: false,
+          canDeleteDocuments: true,
           canSubmitForApproval: false,
           canResubmitForApproval: false,
           companyId: 1,
@@ -1054,6 +1054,10 @@ export const adminApi = {
     roles: string[];
   }) {
     const response = await httpClient.post("/company/admin/employees", payload);
+    return response.data as { message?: string; oneTimePassword?: string };
+  },
+  async resetCompanyAdminEmployeePassword(employeeId: string) {
+    const response = await httpClient.post(`/company/admin/employees/${employeeId}/reset-password`);
     return response.data as { message?: string; oneTimePassword?: string };
   },
   async updateCompanyAdminEmployee(

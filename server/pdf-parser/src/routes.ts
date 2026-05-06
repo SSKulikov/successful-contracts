@@ -51,6 +51,7 @@ import {
   deleteCompanyAdminEmployee,
   getMyCompanyProfile,
   listCompanyAdminEmployees,
+  resetCompanyAdminEmployeePassword,
   updateCompanyAdminEmployee
 } from "./controllers/company-admin.controller";
 
@@ -88,6 +89,12 @@ router.get("/company/employees", requireAuth, listCompanyEmployees);
 router.get("/company/admin/employees", requireAuth, listCompanyAdminEmployees);
 router.post("/company/admin/employees", requireAuth, requirePasswordNotTemporary, createCompanyAdminEmployee);
 router.patch("/company/admin/employees/:id", requireAuth, requirePasswordNotTemporary, updateCompanyAdminEmployee);
+router.post(
+  "/company/admin/employees/:id/reset-password",
+  requireAuth,
+  requirePasswordNotTemporary,
+  resetCompanyAdminEmployeePassword
+);
 router.delete("/company/admin/employees/:id", requireAuth, requirePasswordNotTemporary, deleteCompanyAdminEmployee);
 router.get("/company/profile", requireAuth, getMyCompanyProfile);
 router.post("/auth/login", loginRateLimiter, login);

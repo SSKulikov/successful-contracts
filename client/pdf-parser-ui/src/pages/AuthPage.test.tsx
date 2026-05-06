@@ -23,7 +23,7 @@ describe("AuthPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
 
-    expect(await screen.findByText("Введите email или логин")).toBeInTheDocument();
+    expect(await screen.findByText("Введите email")).toBeInTheDocument();
     expect(await screen.findByText("Введите пароль")).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
   });

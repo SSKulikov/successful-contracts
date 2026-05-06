@@ -171,6 +171,31 @@ function canAccessDocumentCompany(employee: EmployeeAuthContext, docCompanyId: n
   return employee.companyId === docCompanyId;
 }
 
+/** Те же правила видимости карточки, что у GET /documents/:id. */
+async function resolveApprovalDocumentAccess(
+  employee: EmployeeAuthContext,
+  documentId: number,
+  doc: { company_id: number | null; created_by: number; last_edited_by: number }
+): Promise<"ok" | "wrong_company" | "forbidden"> {
+  if (!canAccessDocumentCompany(employee, doc.company_id)) {
+    return "wrong_company";
+  }
+  if (employee.role === "admin" || doc.created_by === employee.id || doc.last_edited_by === employee.id) {
+    return "ok";
+  }
+  const assignedRows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+    `
+      SELECT COUNT(*) AS cnt
+      FROM approval_tasks
+      WHERE document_id = ?
+        AND assignee_user_id = ?
+    `,
+    documentId,
+    employee.id
+  );
+  return Number(assignedRows[0]?.cnt ?? 0) > 0 ? "ok" : "forbidden";
+}
+
 function parseDocumentListFilters(query: Request["query"]): DocumentListFilters {
   const dateFromRaw = normalizeOptionalString(query.date_from);
   const dateToRaw = normalizeOptionalString(query.date_to);
@@ -343,7 +368,7 @@ const MY_DOCUMENTS_LIST_CACHE_TTL_SECONDS = 120;
 
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
-  return `doc:v3:${companyPart}:${documentId}`;
+  return `doc:v4:${companyPart}:${documentId}`;
 }
 
 function buildMyDocumentsListCacheKey(employee: EmployeeAuthContext, filters: DocumentListFilters): string {
@@ -955,25 +980,30 @@ export async function deleteDocument(req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!canAccessDocumentCompany(employee, document.company_id)) {
+    const access = await resolveApprovalDocumentAccess(employee, documentId, document);
+    if (access === "wrong_company") {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
-
-    const canDelete = employee.role === "admin" || document.created_by === employee.id || document.last_edited_by === employee.id;
-    if (!canDelete) {
+    if (access === "forbidden") {
       res.status(403).json({ message: "Недостаточно прав для удаления документа" });
       return;
     }
 
-    if (document.status === "in_approval") {
-      res.status(409).json({ message: "Сначала отзовите документ с согласования" });
-      return;
+    await ensureDocumentAttachmentsTable();
+    const attachmentFileRows = await prisma.$queryRawUnsafe<Array<{ file_name: string }>>(
+      `SELECT file_name FROM document_attachments WHERE document_id = ?`,
+      documentId
+    );
+    const attachmentsRoot = getDocumentAttachmentsRoot();
+    for (const row of attachmentFileRows) {
+      try {
+        fs.unlinkSync(path.join(attachmentsRoot, row.file_name));
+      } catch {
+        /* файл уже отсутствует на диске */
+      }
     }
-    if (document.status === "approved") {
-      res.status(409).json({ message: "Нельзя удалить документ в статусе 'Согласован'" });
-      return;
-    }
+    await prisma.$executeRawUnsafe(`DELETE FROM document_attachments WHERE document_id = ?`, documentId);
 
     await prisma.$executeRawUnsafe(
       `
@@ -1277,27 +1307,14 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       return;
     }
 
-    if (!canAccessDocumentCompany(employee, doc.company_id)) {
+    const access = await resolveApprovalDocumentAccess(employee, documentId, doc);
+    if (access === "wrong_company") {
       res.status(403).json({ message: "Документ принадлежит другой компании" });
       return;
     }
-
-    if (employee.role !== "admin" && doc.created_by !== employee.id && doc.last_edited_by !== employee.id) {
-      const assignedRows = await prisma.$queryRawUnsafe<Array<{ cnt: number }>>(
-        `
-          SELECT COUNT(*) AS cnt
-          FROM approval_tasks
-          WHERE document_id = ?
-            AND assignee_user_id = ?
-        `,
-        documentId,
-        employee.id
-      );
-      const hasAssignment = Number(assignedRows[0]?.cnt ?? 0) > 0;
-      if (!hasAssignment) {
-        res.status(403).json({ message: "Недостаточно прав для просмотра документа" });
-        return;
-      }
+    if (access === "forbidden") {
+      res.status(403).json({ message: "Недостаточно прав для просмотра документа" });
+      return;
     }
 
     const cacheKey = getDocumentCacheKey(doc.company_id, documentId);
@@ -1390,9 +1407,21 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       variant: mapHistoryVariant(event.event_type)
     }));
 
+    const creatorRows = await prisma.$queryRawUnsafe<Array<{ creator_name: string | null }>>(
+      `
+        SELECT CASE WHEN e.deleted_at IS NOT NULL THEN NULL ELSE e.full_name END AS creator_name
+        FROM employees e
+        WHERE e.id = ?
+        LIMIT 1
+      `,
+      doc.created_by
+    );
+    const initiatorName = creatorRows[0]?.creator_name ?? "Удаленный пользователь";
+
     const canEditFlow = employee.role === "admin" || doc.created_by === employee.id || doc.last_edited_by === employee.id;
     const canWithdrawDocuments = canEditFlow && doc.status === "in_approval";
-    const canDeleteDocuments = canEditFlow && doc.status !== "in_approval" && doc.status !== "approved";
+    /** Удаление доступно всем, кто может открыть карточку (доступ к компании + те же правила, что у списка/GET). */
+    const canDeleteDocuments = true;
     const canSubmitForApproval = canEditFlow && doc.status === "uploaded";
     const canResubmitForApproval = canEditFlow && doc.status === "revision";
     const canEditDocumentFields = canEditFlow && (doc.status === "uploaded" || doc.status === "revision");
@@ -1402,7 +1431,7 @@ export async function getDocumentById(req: Request, res: Response): Promise<void
       type: doc.type,
       title: `${doc.type} №${doc.number_value}`,
       status: mapStatusToRuLabel(doc.status),
-      initiator: doc.customer_name,
+      initiator: initiatorName,
       amount: doc.amount,
       currentStep,
       approvalChain,

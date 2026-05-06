@@ -86,6 +86,26 @@ function normalizeDetectedDocumentType(raw: unknown): string | undefined {
 export function MyDocumentsPage() {
   const COLUMN_WIDTHS_STORAGE_KEY = "my-documents-column-widths";
   const VIEWED_KEY = "viewed-documents";
+  const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
+    id: 92,
+    type: 118,
+    title: 148,
+    initiator: 168,
+    amount: 132,
+    createdAt: 156,
+    status: 146,
+    actions: 320
+  };
+  const COLUMN_WIDTH_LIMITS: Record<string, { min: number; max: number }> = {
+    id: { min: 80, max: 130 },
+    type: { min: 100, max: 170 },
+    title: { min: 110, max: 190 },
+    initiator: { min: 140, max: 220 },
+    amount: { min: 120, max: 180 },
+    createdAt: { min: 140, max: 220 },
+    status: { min: 130, max: 190 },
+    actions: { min: 220, max: 420 }
+  };
   const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -112,16 +132,19 @@ export function MyDocumentsPage() {
   const [attachmentsPickerDocumentId, setAttachmentsPickerDocumentId] = useState<string | null>(null);
   const [selectedAttachmentUrl, setSelectedAttachmentUrl] = useState<string | null>(null);
   const [viewedDocIds, setViewedDocIds] = useState<string[]>([]);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    id: 110,
-    type: 130,
-    title: 240,
-    initiator: 190,
-    amount: 140,
-    createdAt: 165,
-    status: 155,
-    actions: 360
-  });
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_COLUMN_WIDTHS);
+
+  const normalizeColumnWidths = (incoming: Record<string, number>) =>
+    Object.entries(DEFAULT_COLUMN_WIDTHS).reduce<Record<string, number>>((acc, [key, fallback]) => {
+      const raw = Number(incoming[key]);
+      const limits = COLUMN_WIDTH_LIMITS[key];
+      if (!Number.isFinite(raw)) {
+        acc[key] = fallback;
+        return acc;
+      }
+      acc[key] = Math.min(limits.max, Math.max(limits.min, Math.round(raw)));
+      return acc;
+    }, {});
 
   const me = getStoredUserProfile();
   const isPlatformAdmin = Boolean(me && isPlatformAdminUser(me));
@@ -141,7 +164,7 @@ export function MyDocumentsPage() {
       const raw = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, number>;
-      setColumnWidths((prev) => ({ ...prev, ...parsed }));
+      setColumnWidths((prev) => ({ ...prev, ...normalizeColumnWidths(parsed) }));
     } catch {
       /* ignore parse errors */
     }
@@ -498,6 +521,14 @@ export function MyDocumentsPage() {
     return (Number.isNaN(left) ? 0 : left) - (Number.isNaN(right) ? 0 : right);
   };
   const sortByDate = (a: string | undefined, b: string | undefined) => new Date(String(a ?? "")).getTime() - new Date(String(b ?? "")).getTime();
+  const extractDocumentNumber = (title: string | undefined) => {
+    const source = String(title ?? "").trim();
+    if (!source) return "";
+    const byNoSign = source.match(/(?:№|#|no\.?|n)\s*([a-zа-я0-9\-\/]+)/i);
+    if (byNoSign?.[1]) return byNoSign[1].trim();
+    const trailingToken = source.match(/([a-zа-я0-9\-\/]+)\s*$/i);
+    return trailingToken?.[1]?.trim() ?? source;
+  };
 
   const handleResize =
     (key: string) =>
@@ -530,16 +561,20 @@ export function MyDocumentsPage() {
       sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.type, b.type)
     },
     {
-      title: "Название",
+      title: "Номер",
       dataIndex: "title",
       key: "title",
       width: columnWidths.title,
       ellipsis: true,
-      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>,
-      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.title, b.title)
+      render: (value: string) => {
+        const number = extractDocumentNumber(value);
+        return <Typography.Text ellipsis={{ tooltip: number }}>{number}</Typography.Text>;
+      },
+      sorter: (a: DocumentRow, b: DocumentRow) =>
+        sortByText(extractDocumentNumber(a.title), extractDocumentNumber(b.title))
     },
     {
-      title: "Инициатор",
+      title: "Заказчик",
       dataIndex: "initiator",
       key: "initiator",
       width: columnWidths.initiator,
@@ -617,14 +652,6 @@ export function MyDocumentsPage() {
                       Отправить
                     </Button>
                   )}
-                  <Button
-                    type="link"
-                    danger
-                    loading={deleteMutation.isPending && deleteMutation.variables === row.id}
-                    onClick={confirmDelete}
-                  >
-                    Удалить
-                  </Button>
                 </>
               ) : null}
               {row.status === "На согласовании" ? (
@@ -636,6 +663,14 @@ export function MyDocumentsPage() {
                   Отозвать
                 </Button>
               ) : null}
+              <Button
+                type="link"
+                danger
+                loading={deleteMutation.isPending && deleteMutation.variables === row.id}
+                onClick={confirmDelete}
+              >
+                Удалить
+              </Button>
             </Space>
           );
         }
@@ -658,14 +693,7 @@ export function MyDocumentsPage() {
                   label: "Отправить",
                   disabled: submitMutation.isPending,
                   onClick: () => void openSubmitRouteModal(row.id)
-                },
-            {
-              key: "delete",
-              label: "Удалить",
-              danger: true,
-              disabled: deleteMutation.isPending,
-              onClick: confirmDelete
-            }
+                }
           );
         }
         if (row.status === "На согласовании") {
@@ -676,6 +704,13 @@ export function MyDocumentsPage() {
             onClick: confirmWithdraw
           });
         }
+        items.push({
+          key: "delete",
+          label: "Удалить",
+          danger: true,
+          disabled: deleteMutation.isPending,
+          onClick: confirmDelete
+        });
         return (
           <Dropdown menu={{ items }} trigger={["click"]} placement="bottomRight">
             <Button icon={<MoreOutlined />} aria-label={`Действия для документа ${row.id}`} />
@@ -877,6 +912,7 @@ export function MyDocumentsPage() {
         }}
         okButtonProps={{ disabled: !selectedAttachmentUrl }}
         okText="Открыть"
+        cancelText="Отмена"
       >
         <Select
           style={{ width: "100%" }}
@@ -896,6 +932,7 @@ export function MyDocumentsPage() {
         onOk={handleModalOk}
         onCancel={() => setIsModalOpen(false)}
         confirmLoading={saveDocumentMutation.isPending}
+        cancelText="Отмена"
         width={760}
       >
         <Space style={{ marginBottom: 12 }}>
@@ -966,7 +1003,25 @@ export function MyDocumentsPage() {
             <Input />
           </Form.Item>
           <Form.Item name="amount" label="Сумма" rules={[{ required: true, message: "Укажите сумму" }]}>
-            <InputNumber min={0} style={{ width: "100%" }} />
+            <InputNumber<number>
+              min={0}
+              style={{ width: "100%" }}
+              formatter={(value) => {
+                const numeric = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".");
+                if (!numeric) return "";
+                const amount = Number(numeric);
+                if (Number.isNaN(amount)) return "";
+                return `${new Intl.NumberFormat("ru-RU", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2
+                }).format(amount)} ₽`;
+              }}
+              parser={(value) => {
+                const normalized = String(value ?? "").replace(/[^\d.,-]/g, "").replace(",", ".");
+                const amount = Number(normalized);
+                return Number.isNaN(amount) ? 0 : amount;
+              }}
+            />
           </Form.Item>
           <Form.Item name="subject" label="Основание / предмет" rules={[{ required: true, message: "Укажите предмет документа" }]}>
             <Input />
