@@ -14,7 +14,7 @@ type DecisionAction = "approve" | "reject" | "revise";
 
 function getDocumentCacheKey(companyId: number | null, documentId: number) {
   const companyPart = companyId === null ? "none" : String(companyId);
-  return `doc:v2:${companyPart}:${documentId}`;
+  return `doc:v4:${companyPart}:${documentId}`;
 }
 
 function normalizeOptionalQueryString(value: unknown): string | null {

@@ -46,7 +46,7 @@ export function CompanyManagementPage() {
   });
   const resetEmployeePassword = useMutation({
     mutationFn: adminApi.resetCompanyAdminEmployeePassword,
-    onSuccess: (data, employeeId) => {
+    onSuccess: (data, _employeeId) => {
       if (data.oneTimePassword) {
         setLastIssuedPassword(data.oneTimePassword);
         message.success("Одноразовый пароль сгенерирован");

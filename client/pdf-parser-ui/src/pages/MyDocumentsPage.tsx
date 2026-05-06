@@ -652,14 +652,6 @@ export function MyDocumentsPage() {
                       Отправить
                     </Button>
                   )}
-                  <Button
-                    type="link"
-                    danger
-                    loading={deleteMutation.isPending && deleteMutation.variables === row.id}
-                    onClick={confirmDelete}
-                  >
-                    Удалить
-                  </Button>
                 </>
               ) : null}
               {row.status === "На согласовании" ? (
@@ -671,6 +663,14 @@ export function MyDocumentsPage() {
                   Отозвать
                 </Button>
               ) : null}
+              <Button
+                type="link"
+                danger
+                loading={deleteMutation.isPending && deleteMutation.variables === row.id}
+                onClick={confirmDelete}
+              >
+                Удалить
+              </Button>
             </Space>
           );
         }
@@ -693,14 +693,7 @@ export function MyDocumentsPage() {
                   label: "Отправить",
                   disabled: submitMutation.isPending,
                   onClick: () => void openSubmitRouteModal(row.id)
-                },
-            {
-              key: "delete",
-              label: "Удалить",
-              danger: true,
-              disabled: deleteMutation.isPending,
-              onClick: confirmDelete
-            }
+                }
           );
         }
         if (row.status === "На согласовании") {
@@ -711,6 +704,13 @@ export function MyDocumentsPage() {
             onClick: confirmWithdraw
           });
         }
+        items.push({
+          key: "delete",
+          label: "Удалить",
+          danger: true,
+          disabled: deleteMutation.isPending,
+          onClick: confirmDelete
+        });
         return (
           <Dropdown menu={{ items }} trigger={["click"]} placement="bottomRight">
             <Button icon={<MoreOutlined />} aria-label={`Действия для документа ${row.id}`} />
