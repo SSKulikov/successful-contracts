@@ -86,6 +86,7 @@ export type DocumentDetails = {
   /** PATCH полей в «Загружен» / «На доработке». */
   canEditDocumentFields?: boolean;
   companyId?: number | null;
+  companyInn?: string | null;
   createdAt: string;
   updatedAt: string;
   history: DocumentHistoryItem[];

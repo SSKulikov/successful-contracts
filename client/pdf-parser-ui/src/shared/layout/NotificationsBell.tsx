@@ -107,7 +107,8 @@ export function NotificationsBell() {
                   opacity: item.read ? 0.72 : 1,
                   background: item.read ? undefined : "rgba(51, 65, 85, 0.08)",
                   paddingInline: 12,
-                  borderRadius: 8
+                  borderRadius: 8,
+                  marginBottom: 16
                 }}
                 onClick={() => void onItemClick(item)}
               >

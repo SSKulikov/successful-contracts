@@ -97,7 +97,7 @@ export function CompanyManagementPage() {
       key: "actions",
       render: (_, row) => (
         <Space size={4}>
-          <Button type="link" icon={<KeyOutlined />} loading={resetEmployeePassword.isPending} onClick={() => resetEmployeePassword.mutate(row.key)}>
+          <Button type="link" icon={<KeyOutlined />} loading={resetEmployeePassword.isPending} onClick={() => resetEmployeePassword.mutate(row.key)} style={{ paddingLeft: 0 }}>
             Смена пароля
           </Button>
           <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteEmployee.mutate(row.key)}>
@@ -116,7 +116,7 @@ export function CompanyManagementPage() {
       title: "Действия",
       key: "actions",
       render: (_, row) => (
-        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteRoute.mutate(row.id)}>
+        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteRoute.mutate(row.id)} style={{ paddingLeft: 0 }}>
           Удалить
         </Button>
       )
@@ -148,17 +148,17 @@ export function CompanyManagementPage() {
                       <Form.Item name="roles" label="Роли" rules={[{ required: true }]} style={{ minWidth: 280 }}>
                         <Select mode="multiple" options={ROLE_OPTIONS} />
                       </Form.Item>
-                      <Form.Item label=" " style={{ alignSelf: "flex-end" }}>
-                        <Button
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          loading={createEmployee.isPending}
-                          onClick={async () => createEmployee.mutate(await employeeForm.validateFields())}
-                        >
-                          Создать сотрудника
-                        </Button>
-                      </Form.Item>
                     </Space>
+                    <div style={{ marginTop: 0 }}>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        loading={createEmployee.isPending}
+                        onClick={async () => createEmployee.mutate(await employeeForm.validateFields())}
+                      >
+                        Создать сотрудника
+                      </Button>
+                    </div>
                     <div style={{ marginTop: 12, maxWidth: 520 }}>
                       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>
                         Сгенерированный одноразовый пароль
@@ -224,31 +224,29 @@ export function CompanyManagementPage() {
                               ) : null}
                             </Space>
                           ))}
-                          <div style={{ marginBottom: 8 }}>
+                          <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ assigneeKind: "employee" })}>
                               Добавить шаг
+                            </Button>
+                            <Button type="primary" loading={createRoute.isPending} onClick={async () => {
+                              const values = await routeForm.validateFields();
+                              createRoute.mutate({
+                                name: values.name,
+                                isDefault: values.isDefault === true,
+                                documentType: values.documentType ?? null,
+                                steps: (values.steps ?? []).map((s: { assigneeKind: "employee"; assigneeEmployeeId: number }, i: number) => ({
+                                  stepOrder: i + 1,
+                                  assigneeKind: s.assigneeKind,
+                                  assigneeEmployeeId: s.assigneeEmployeeId
+                                }))
+                              });
+                            }}>
+                              Сохранить маршрут
                             </Button>
                           </div>
                         </Space>
                       )}
                     </Form.List>
-                    <div style={{ marginTop: 12 }}>
-                      <Button type="primary" loading={createRoute.isPending} onClick={async () => {
-                        const values = await routeForm.validateFields();
-                        createRoute.mutate({
-                          name: values.name,
-                          isDefault: values.isDefault === true,
-                          documentType: values.documentType ?? null,
-                          steps: (values.steps ?? []).map((s: { assigneeKind: "employee"; assigneeEmployeeId: number }, i: number) => ({
-                            stepOrder: i + 1,
-                            assigneeKind: s.assigneeKind,
-                            assigneeEmployeeId: s.assigneeEmployeeId
-                          }))
-                        });
-                      }}>
-                        Сохранить маршрут
-                      </Button>
-                    </div>
                   </Form>
                 </Card>
                 <Card title="Список маршрутов">
