@@ -26,6 +26,7 @@ import { parseApproverEmployeeIds } from "../utils/parse-approver-employee-ids";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import { getStorageService } from "../services/StorageService/factory";
 
 type DocumentStatus = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
 
@@ -283,6 +284,14 @@ function getDocumentAttachmentsRoot(): string {
   return path.resolve(process.cwd(), "uploads", "documents");
 }
 
+function getRawBucket(): string {
+  const bucket = process.env.S3_BUCKET_RAW?.trim();
+  if (!bucket) {
+    throw new Error("Missing required env var: S3_BUCKET_RAW");
+  }
+  return bucket;
+}
+
 function normalizeUploadedOriginalName(fileName: string): string {
   try {
     const decoded = Buffer.from(fileName, "latin1").toString("utf8");
@@ -296,6 +305,16 @@ function buildAttachmentPublicUrl(req: Request, fileName: string): string {
   const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
   const host = req.get("host");
   return `${proto}://${host}/api/document-files/${encodeURIComponent(fileName)}`;
+}
+
+function buildAttachmentObjectKey(companyId: number | null, documentId: number, fileName: string): string {
+  const companyPart = companyId == null ? "no-company" : String(companyId);
+  return `attachments/${companyPart}/${documentId}/${fileName}`;
+}
+
+function localAttachmentPath(fileName: string): string {
+  const safeName = path.basename(fileName);
+  return path.join(getDocumentAttachmentsRoot(), safeName);
 }
 
 async function ensureDocumentAttachmentsTable(): Promise<void> {
@@ -314,18 +333,43 @@ async function ensureDocumentAttachmentsTable(): Promise<void> {
       INDEX idx_doc_attachments_company_id (company_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  const dbNameRows = await prisma.$queryRawUnsafe<Array<{ db_name: string }>>("SELECT DATABASE() AS db_name");
+  const dbName = dbNameRows[0]?.db_name;
+  if (!dbName) throw new Error("Не удалось определить текущую БД");
+
+  const addColumnIfMissing = async (columnName: string, ddl: string) => {
+    const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+      `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'document_attachments' AND COLUMN_NAME = ?`,
+      dbName,
+      columnName
+    );
+    if (Number(rows[0]?.cnt ?? 0) === 0) {
+      await prisma.$executeRawUnsafe(ddl);
+    }
+  };
+
+  const addIndexIfMissing = async (indexName: string, ddl: string) => {
+    const rows = await prisma.$queryRawUnsafe<Array<{ cnt: bigint }>>(
+      `SELECT COUNT(*) AS cnt FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'document_attachments' AND INDEX_NAME = ?`,
+      dbName,
+      indexName
+    );
+    if (Number(rows[0]?.cnt ?? 0) === 0) {
+      await prisma.$executeRawUnsafe(ddl);
+    }
+  };
+
+  await addColumnIfMissing("storage_provider", "ALTER TABLE document_attachments ADD COLUMN storage_provider VARCHAR(16) NOT NULL DEFAULT 'local'");
+  await addColumnIfMissing("bucket", "ALTER TABLE document_attachments ADD COLUMN bucket VARCHAR(255) NULL");
+  await addColumnIfMissing("object_key", "ALTER TABLE document_attachments ADD COLUMN object_key VARCHAR(768) NULL");
+  await addColumnIfMissing("size_bytes", "ALTER TABLE document_attachments ADD COLUMN size_bytes BIGINT UNSIGNED NULL");
+  await addColumnIfMissing("checksum_sha256", "ALTER TABLE document_attachments ADD COLUMN checksum_sha256 CHAR(64) NULL");
+  await addIndexIfMissing("idx_doc_attachments_object_key", "CREATE INDEX idx_doc_attachments_object_key ON document_attachments(object_key)");
 }
 
 const attachmentUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      fs.mkdirSync(getDocumentAttachmentsRoot(), { recursive: true });
-      cb(null, getDocumentAttachmentsRoot());
-    },
-    filename: (_req, file, cb) => {
-      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${path.extname(file.originalname)}`);
-    }
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 }
 }).single("file");
 
@@ -1487,6 +1531,48 @@ export async function listDocumentAttachments(req: Request, res: Response): Prom
   }
 }
 
+export async function serveDocumentFile(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureDocumentAttachmentsTable();
+    const fileName = path.basename(String(req.params.fileName ?? ""));
+    if (!fileName) {
+      res.status(400).json({ message: "Имя файла обязательно" });
+      return;
+    }
+
+    const rows = await prisma.$queryRawUnsafe<Array<{ bucket: string | null; object_key: string | null; original_name: string }>>(
+      `SELECT bucket, object_key, original_name FROM document_attachments WHERE file_name = ? ORDER BY id DESC LIMIT 1`,
+      fileName
+    );
+    const row = rows[0];
+
+    if (row?.bucket && row.object_key) {
+      try {
+        const downloadUrl = await getStorageService().getPresignedDownloadUrl({
+          bucket: row.bucket,
+          key: row.object_key,
+          responseContentDisposition: `attachment; filename="${normalizeUploadedOriginalName(row.original_name).replace(/"/g, "")}"`
+        });
+        res.redirect(downloadUrl);
+        return;
+      } catch (error) {
+        logger.warn(`S3 attachment read failed, falling back to local file ${fileName}: ${error}`);
+      }
+    }
+
+    const filePath = localAttachmentPath(fileName);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ message: "Файл не найден" });
+      return;
+    }
+
+    res.sendFile(filePath);
+  } catch (error) {
+    logger.error(`❌ Ошибка чтения вложения: ${error}`);
+    res.status(500).json({ message: "Ошибка чтения вложения" });
+  }
+}
+
 export async function uploadDocumentAttachment(req: Request, res: Response): Promise<void> {
   attachmentUpload(req, res, async (err) => {
     if (err) {
@@ -1511,14 +1597,39 @@ export async function uploadDocumentAttachment(req: Request, res: Response): Pro
         res.status(400).json({ message: "Файл не загружен" });
         return;
       }
+      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${path.extname(req.file.originalname)}`;
+      const originalName = normalizeUploadedOriginalName(req.file.originalname);
+      const bucket = getRawBucket();
+      const objectKey = buildAttachmentObjectKey(document.company_id, documentId, fileName);
+      const checksumSha256 = createHash("sha256").update(req.file.buffer).digest("hex");
+
+      await getStorageService().putObject({
+        bucket,
+        key: objectKey,
+        body: req.file.buffer,
+        contentType: req.file.mimetype,
+        contentLength: req.file.size,
+        metadata: {
+          originalName: encodeURIComponent(originalName)
+        }
+      });
+
       await prisma.$executeRawUnsafe(
-        `INSERT INTO document_attachments (document_id, company_id, file_name, original_name, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)`,
+        `
+          INSERT INTO document_attachments
+            (document_id, company_id, file_name, original_name, mime_type, uploaded_by, storage_provider, bucket, object_key, size_bytes, checksum_sha256)
+          VALUES (?, ?, ?, ?, ?, ?, 's3', ?, ?, ?, ?)
+        `,
         documentId,
         document.company_id,
-        req.file.filename,
-        normalizeUploadedOriginalName(req.file.originalname),
+        fileName,
+        originalName,
         req.file.mimetype,
-        employee.id
+        employee.id,
+        bucket,
+        objectKey,
+        req.file.size,
+        checksumSha256
       );
       await del(getDocumentCacheKey(document.company_id, documentId));
       res.status(201).json({ ok: true });

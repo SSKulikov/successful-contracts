@@ -27,6 +27,7 @@ import {
   listMyDocuments,
   getMyDocumentsStatusStats,
   resubmitDocument,
+  serveDocumentFile,
   submitDocument,
   uploadDocumentAttachment,
   updateDocument,
@@ -41,6 +42,12 @@ import {
 import { createRouteAdmin, listRoutesAdmin, updateRouteAdmin, deleteRouteAdmin, listCompanyRoutes } from "./controllers/approval-routes.controller";
 import { createCompanyRoute, deleteCompanyRoute, updateCompanyRoute } from "./controllers/approval-routes.controller";
 import { getHealth } from "./controllers/health.controller";
+import {
+  completeDocumentUpload,
+  createDocumentUploadUrl,
+  getDocumentDownloadUrl,
+  getDocumentProcessingStatus
+} from "./controllers/storage-documents.controller";
 import { requireAuth } from "./middleware/requireAuth";
 import { requirePasswordNotTemporary } from "./middleware/requirePasswordNotTemporary";
 import { requirePlatformAdmin } from "./middleware/requirePlatformAdmin";
@@ -96,6 +103,11 @@ router.get("/users/me", requireAuth, getMyProfile);
 router.patch("/users/me", requireAuth, requirePasswordNotTemporary, updateMyProfile);
 router.post("/users/me/avatar", requireAuth, requirePasswordNotTemporary, handleAvatarUpload, uploadMyAvatar);
 router.post("/users/me/change-password", requireAuth, changeMyPassword);
+router.get("/document-files/:fileName", serveDocumentFile);
+router.post("/documents/upload-url", requireAuth, requirePasswordNotTemporary, createDocumentUploadUrl);
+router.post("/documents/:id/complete", requireAuth, requirePasswordNotTemporary, completeDocumentUpload);
+router.get("/documents/:id/status", requireAuth, getDocumentProcessingStatus);
+router.get("/documents/:id/download-url", requireAuth, getDocumentDownloadUrl);
 router.post("/documents", requireAuth, requirePasswordNotTemporary, createDocument);
 router.get("/documents/my", requireAuth, listMyDocuments);
 router.get("/documents/my/stats", requireAuth, getMyDocumentsStatusStats);

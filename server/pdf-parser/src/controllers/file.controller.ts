@@ -210,6 +210,41 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage }).single("file");
 
+export async function parseStoredDocumentFile(params: {
+  originalName: string;
+  storedFileName: string;
+  absolutePath: string;
+}) {
+  const fileExtension = path.extname(params.originalName);
+  const fileNameWithoutExtension = path.parse(params.storedFileName).name;
+
+  const fileBytes = await fs.promises.readFile(params.absolutePath);
+  const contentSha256Hex = sha256HexOfFileBytes(fileBytes);
+  const pipelineCacheKey = buildParsePipelineCacheKey(contentSha256Hex);
+
+  let parsedJson: Awaited<ReturnType<typeof parseFunc>>;
+  let pipelineCacheHit = false;
+
+  const cached = await getJson<unknown>(pipelineCacheKey);
+  if (cached && isPipelineCachedPayload(cached)) {
+    parsedJson = cached as Awaited<ReturnType<typeof parseFunc>>;
+    pipelineCacheHit = true;
+  } else {
+    parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension, params.absolutePath);
+    await setJson(pipelineCacheKey, parsedJson, getParsePipelineCacheTtlSeconds());
+  }
+
+  const normalizedContentSha256 = sha256HexOfStableJson(parsedJson);
+  await setParseNormalizedDataHash(params.storedFileName, normalizedContentSha256);
+
+  return {
+    parsedJson,
+    normalizedContentSha256,
+    contentSha256: contentSha256Hex,
+    pipelineCacheHit
+  };
+}
+
 // Контроллер загрузки файла
 export const parseFile = (req: Request, res: Response) => {
   upload(req, res, async (err) => {
@@ -218,36 +253,20 @@ export const parseFile = (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ error: "Файл не загружен" });
 
     try {
-      const fileExtension = path.extname(req.file.originalname); // Получаем расширение файла
-      const fileNameWithoutExtension = path.parse(req.file.filename).name; // Получаем имя файла без расширения
-
-      const fileBytes = await fs.promises.readFile(req.file.path);
-      const contentSha256Hex = sha256HexOfFileBytes(fileBytes);
-      const pipelineCacheKey = buildParsePipelineCacheKey(contentSha256Hex);
-
-      let parsedJson: Awaited<ReturnType<typeof parseFunc>>;
-      let pipelineCacheHit = false;
-
-      const cached = await getJson<unknown>(pipelineCacheKey);
-      if (cached && isPipelineCachedPayload(cached)) {
-        parsedJson = cached as Awaited<ReturnType<typeof parseFunc>>;
-        pipelineCacheHit = true;
-      } else {
-        parsedJson = await parseFunc(fileNameWithoutExtension, fileExtension, req.file.path);
-        await setJson(pipelineCacheKey, parsedJson, getParsePipelineCacheTtlSeconds());
-      }
-
-      const normalizedContentSha256 = sha256HexOfStableJson(parsedJson);
-      await setParseNormalizedDataHash(req.file.filename, normalizedContentSha256);
+      const parsed = await parseStoredDocumentFile({
+        originalName: req.file.originalname,
+        storedFileName: req.file.filename,
+        absolutePath: req.file.path
+      });
 
       res.json({
         message: "Файл загружен",
         filename: req.file.filename,
         path: req.file.path,
-        parsedJson,
-        normalizedContentSha256,
-        contentSha256: contentSha256Hex,
-        pipelineCacheHit
+        parsedJson: parsed.parsedJson,
+        normalizedContentSha256: parsed.normalizedContentSha256,
+        contentSha256: parsed.contentSha256,
+        pipelineCacheHit: parsed.pipelineCacheHit
       });
     } catch (error) {
       const message =

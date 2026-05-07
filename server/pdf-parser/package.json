@@ -19,7 +19,8 @@
     "test:e2e:approval-branches": "tsx scripts/approval-decision-branches-e2e.ts",
     "test:e2e:password-gate": "tsx scripts/password-gate-e2e.ts",
     "test:e2e:soft-delete": "tsx scripts/soft-delete-e2e.ts",
-    "test:e2e:notifications": "tsx scripts/notifications-e2e.ts"
+    "test:e2e:notifications": "tsx scripts/notifications-e2e.ts",
+    "migrate:attachments-to-s3": "tsx scripts/migrate-local-attachments-to-s3.ts"
   },
   "keywords": [],
   "license": "ISC",
@@ -38,6 +39,8 @@
     "typescript": "^5.5.3"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1044.0",
+    "@aws-sdk/s3-request-presigner": "^3.1044.0",
     "@eslint/js": "^9.12.0",
     "@prisma/client": "5.5.2",
     "axios": "^1.7.7",

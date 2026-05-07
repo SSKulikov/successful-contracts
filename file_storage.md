@@ -287,29 +287,29 @@ DATABASE_URL=mysql://USER:PASSWORD@VPS_HOST:3306/docflow
 - [x] Применить миграции во внешней MySQL.
 
 ### Этап 3 — Backend и storage
-- [ ] Создать интерфейс `StorageService`.
-- [ ] Реализовать `S3StorageService`.
-- [ ] Оставить `LocalStorageService` для fallback/dev.
-- [ ] Переключить работу с БД документов на VPS MySQL.
-- [ ] Реализовать `POST /documents/upload-url`.
-- [ ] Реализовать `POST /documents/:id/complete`.
-- [ ] Реализовать `GET /documents/:id/status`.
-- [ ] Реализовать `GET /documents/:id/download-url`.
+- [x] Создать интерфейс `StorageService`.
+- [x] Реализовать `S3StorageService`.
+- [x] Оставить `LocalStorageService` для fallback/dev.
+- [x] Переключить работу с БД документов на VPS MySQL.
+- [x] Реализовать `POST /documents/upload-url`.
+- [x] Реализовать `POST /documents/:id/complete`.
+- [x] Реализовать `GET /documents/:id/status`.
+- [x] Реализовать `GET /documents/:id/download-url`.
 
 ### Этап 4 — Обработка документов
-- [ ] Подключить вызов `pdf-parser` без RabbitMQ.
-- [ ] Перед обработкой ставить `processing`.
-- [ ] На успехе ставить `done`.
-- [ ] На ошибке ставить `failed` + `processing_error`.
-- [ ] Добавить timeout обработки.
-- [ ] Добавить лимит максимального размера файла.
-- [ ] Добавить идемпотентность повторного `complete`.
+- [x] Подключить вызов `pdf-parser` без RabbitMQ.
+- [x] Перед обработкой ставить `processing`.
+- [x] На успехе ставить `done`.
+- [x] На ошибке ставить `failed` + `processing_error`.
+- [x] Добавить timeout обработки.
+- [x] Добавить лимит максимального размера файла.
+- [x] Добавить идемпотентность повторного `complete`.
 
 ### Этап 5 — Миграция legacy storage и локальной БД
-- [ ] Включить dual-read (`S3 -> local fallback`).
-- [ ] Переключить новые загрузки на S3.
-- [ ] Мигрировать старые файлы из локальной `storage`.
-- [ ] Сверить checksum/размер после переноса.
+- [x] Включить dual-read (`S3 -> local fallback`).
+- [x] Переключить новые загрузки на S3.
+- [x] Мигрировать старые файлы из локальной `storage`.
+- [x] Сверить checksum/размер после переноса.
 - [ ] Мигрировать метаданные документов во внешнюю MySQL.
 - [ ] Проверить целостность данных (count/status/checksum).
 - [ ] Переключить чтение полностью на S3.

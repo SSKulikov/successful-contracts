@@ -34,7 +34,6 @@ app.use(cors(getCorsOptions()));
 
 ensureAvatarsDir();
 app.use("/api/avatars", express.static(getAvatarsRoot(), { maxAge: "1d" }));
-app.use("/api/document-files", express.static(path.resolve(process.cwd(), "uploads", "documents"), { maxAge: "1d" }));
 
 // Тот же обработчик, что GET /api/health — удобно для прокси, которые не префиксуют /api
 app.get("/health", getHealth);
