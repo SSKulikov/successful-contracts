@@ -78,6 +78,7 @@ model Employee {
   avatarUrl           String?       @map("avatar_url") @db.VarChar(512)
   company             Company?      @relation(fields: [companyId], references: [id], onDelete: Cascade)
   authSessions        AuthSession[]
+  documents           Document[]
 
   @@index([companyId])
   @@index([deletedAt])
@@ -91,4 +92,46 @@ model AuthSession {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@map("auth_sessions")
+}
+
+enum DocumentProcessingStatus {
+  uploaded
+  processing
+  done
+  failed
+}
+
+model Document {
+  id                 String                   @id @default(uuid()) @db.Char(36)
+  ownerId            Int                      @map("owner_id")
+  storageProvider    String                   @default("s3") @map("storage_provider") @db.VarChar(16)
+  bucket             String                   @db.VarChar(255)
+  objectKey          String                   @unique @map("object_key") @db.VarChar(768)
+  originalName       String                   @map("original_name") @db.VarChar(512)
+  mimeType           String                   @map("mime_type") @db.VarChar(255)
+  sizeBytes          BigInt                   @map("size_bytes") @db.UnsignedBigInt
+  checksumSha256     String?                  @map("checksum_sha256") @db.Char(64)
+  processingStatus   DocumentProcessingStatus @default(uploaded) @map("processing_status")
+  processingError    String?                  @map("processing_error") @db.Text
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.DateTime(0)
+  updatedAt          DateTime                 @updatedAt @map("updated_at") @db.DateTime(0)
+  owner              Employee                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  contents           DocumentContent[]
+
+  @@index([processingStatus, createdAt])
+  @@index([ownerId, createdAt])
+  @@map("documents")
+}
+
+model DocumentContent {
+  documentId         String   @map("document_id") @db.Char(36)
+  version            Int      @default(1)
+  textContent        String?  @map("text_content") @db.LongText
+  processedBucket    String?  @map("processed_bucket") @db.VarChar(255)
+  processedObjectKey String?  @map("processed_object_key") @db.VarChar(1024)
+  extractedAt        DateTime @default(now()) @map("extracted_at") @db.DateTime(0)
+  document           Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, version])
+  @@map("document_contents")
 }

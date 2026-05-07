@@ -1,8 +1,8 @@
-# File Storage Migration Plan (S3 + Supabase PostgreSQL, без RabbitMQ)
+# File Storage Migration Plan (Yandex Object Storage + VPS MySQL, без RabbitMQ)
 
 Этот документ описывает практический переход от локальной папки `storage` и локальной БД проекта к внешней схеме:
 - файлы в S3-совместимом Object Storage;
-- метаданные и статусы в `PostgreSQL` на Supabase (free tier);
+- метаданные и статусы во внешней `MySQL` на VPS;
 - без RabbitMQ на текущем этапе.
 
 ---
@@ -16,7 +16,7 @@
 
 ### После внедрения
 - Файлы хранятся в Object Storage (S3 API).
-- Метаданные/статусы документов хранятся во внешней БД Supabase Postgres.
+- Метаданные/статусы документов хранятся во внешней БД MySQL на VPS.
 - Backend выдает presigned URL и управляет статусовкой.
 - Парсинг пока остается без очередей: синхронно или через существующий внутренний вызов.
 - Локальная `storage` не используется как постоянное хранилище.
@@ -27,20 +27,20 @@
 
 Поток:
 1. Клиент запрашивает URL для загрузки у backend.
-2. Backend создает `documentId`, `objectKey`, запись в Supabase и возвращает `presigned PUT URL`.
+2. Backend создает `documentId`, `objectKey`, запись во внешней MySQL и возвращает `presigned PUT URL`.
 3. Клиент загружает файл напрямую в S3.
 4. Клиент вызывает `POST /documents/:id/complete`.
 5. Backend делает `headObject`, подтверждает upload и запускает парсинг без RabbitMQ.
-6. Backend сохраняет результат и статус в Supabase.
+6. Backend сохраняет результат и статус во внешней MySQL.
 
 Компоненты:
 - `API backend` — auth, валидация, presigned URL, запуск парсинга.
 - `Object Storage` — хранение оригиналов и результатов.
-- `Supabase PostgreSQL` — внешнее хранение метаданных и статусов.
+- `VPS MySQL` — внешнее хранение метаданных и статусов.
 
 ---
 
-## 3. Структура данных (Supabase PostgreSQL)
+## 3. Структура данных (VPS MySQL)
 
 ### `documents`
 - `id` (uuid, pk)
@@ -71,21 +71,22 @@
 
 ---
 
-## 4. Supabase Free Plan — практические ограничения
+## 4. VPS MySQL — практические ограничения
 
 Что подходит:
-- хороший вариант старта для внешней БД без администрирования своего Postgres;
-- быстрый запуск и удобные миграции.
+- внешняя БД уже поднята на VPS;
+- backend подключается через `DATABASE_URL`;
+- Prisma migrations применяются к целевой БД.
 
 Что учесть заранее:
-- ограниченные ресурсы free tier;
-- ограничения на соединения;
-- чувствительность к тяжелым запросам/большим батчам.
+- следить за доступностью VPS, бэкапами и обновлениями MySQL;
+- ограничить доступ к порту MySQL только нужными IP;
+- контролировать лимиты соединений и тяжелые запросы;
+- настроить регулярные backups/restore-runbook.
 
 Правила для проекта:
-- runtime backend подключать через pooled URL (`DATABASE_URL`);
-- миграции запускать через direct URL (`DIRECT_URL`);
-- использовать SSL (`sslmode=require`);
+- runtime backend подключать через `DATABASE_URL`;
+- миграции запускать той же строкой подключения через Prisma;
 - в БД хранить метаданные/статусы, а большие бинарные данные и тяжелые результаты — в S3;
 - добавить простые ретраи на транзиентные DB-ошибки.
 
@@ -98,7 +99,7 @@
    - Выход: `documentId`, `objectKey`, `uploadUrl`, `headers`
    - Действия:
      - валидация размера/типа;
-     - создание записи в `documents` со статусом `uploaded` в Supabase;
+     - создание записи в `documents` со статусом `uploaded` во внешней MySQL;
      - генерация presigned URL.
 
 2. `POST /documents/:id/complete`
@@ -110,7 +111,7 @@
    - статус `done` или `failed`.
 
 3. `GET /documents/:id/status`
-   - Возвращает статус и ошибку обработки из Supabase.
+   - Возвращает статус и ошибку обработки из внешней MySQL.
 
 4. `GET /documents/:id/download-url`
    - Возвращает presigned URL на скачивание оригинала или результата.
@@ -141,7 +142,7 @@
 На данном этапе:
 - запуск обработки происходит в `POST /documents/:id/complete`;
 - backend вызывает текущий `pdf-parser` напрямую;
-- статус документа обновляется в Supabase до/после обработки.
+- статус документа обновляется во внешней MySQL до/после обработки.
 
 Важно:
 - ограничить размер входного файла;
@@ -171,9 +172,8 @@ S3_PRESIGNED_DOWNLOAD_TTL_SEC=900
 PARSER_MAX_FILE_MB=30
 PARSER_JOB_TIMEOUT_MS=120000
 
-# Supabase PostgreSQL
-DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.supabase.com:6543/postgres?sslmode=require
-DIRECT_URL=postgresql://postgres:__PASSWORD__@db.__PROJECT_REF__.supabase.co:5432/postgres?sslmode=require
+# VPS MySQL
+DATABASE_URL=mysql://USER:PASSWORD@VPS_HOST:3306/docflow
 ```
 
 ### `server/pdf-parser/.env.example`
@@ -189,8 +189,8 @@ S3_ACCESS_KEY_ID=__SET_ME__
 S3_SECRET_ACCESS_KEY=__SET_ME__
 S3_FORCE_PATH_STYLE=false
 
-# Supabase (если parser пишет результат/статус в БД)
-DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.supabase.com:6543/postgres?sslmode=require
+# VPS MySQL
+DATABASE_URL=mysql://USER:PASSWORD@VPS_HOST:3306/docflow
 ```
 
 Важно:
@@ -210,9 +210,9 @@ DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.
    - загрузить в S3;
    - обновить `bucket/object_key` в БД;
    - сверить checksum/размер.
-4. Создать Supabase проект и применить миграции схемы.
-5. Перенести таблицы документов/статусов из локальной БД в Supabase (батчами).
-6. Переключить backend на Supabase `DATABASE_URL`.
+4. Подготовить внешнюю MySQL на VPS и применить миграции схемы.
+5. Перенести таблицы документов/статусов из локальной БД во внешнюю MySQL (батчами).
+6. Переключить backend на VPS MySQL `DATABASE_URL`.
 7. Перевести read-path полностью на S3.
 8. Оставить fallback и rollback-план на переходный период.
 9. Удалить legacy-файлы после верификации.
@@ -222,17 +222,19 @@ DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.
 ## 10. Rollout по этапам
 
 ### Этап 0 — Инфраструктура
-- Выбрать провайдера S3 (`Yandex Object Storage` для prod, `MinIO` для local).
-- Создать `contracts-raw` и `contracts-processed`.
-- Создать сервисный аккаунт (`sa-contracts-storage`) и выдать `storage.editor`.
-- Создать access key / secret key.
-- Настроить lifecycle и CORS (при необходимости).
-- Создать проект в Supabase (free) и получить `DATABASE_URL`/`DIRECT_URL`.
-- Проверить подключение backend к Supabase.
+- [x] Выбрать провайдера S3 (`Yandex Object Storage` для prod, `MinIO` для local).
+- [x] Создать `contracts-raw` и `contracts-processed`.
+- [x] Создать сервисный аккаунт (`sa-contracts-storage`) и выдать роли Object Storage.
+- [x] Создать access key / secret key.
+- [x] Выдать сервисному аккаунту права на KMS-ключи бакетов (`kms.keys.encrypterDecrypter`).
+- [x] Настроить lifecycle и CORS.
+- [x] Подключить backend к внешней VPS MySQL через `DATABASE_URL`.
+- [x] Применить Prisma migrations к VPS MySQL.
+- [x] Пройти S3 smoke-test (`list/upload/head/download/delete`).
 
 ### Этап 1 — Схема и backend
 - Добавить миграции `documents` и `document_contents`.
-- Применить миграции в Supabase.
+- Применить миграции во внешней MySQL.
 - Добавить `StorageService` + `S3StorageService`.
 - Реализовать `POST /documents/upload-url`.
 - Реализовать `POST /documents/:id/complete`.
@@ -243,49 +245,52 @@ DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.
 - Ограничить размер файла и timeout.
 - Обработать повторные вызовы `complete` (идемпотентность).
 - Логировать и сохранять причины `failed`.
-- Проверить работу при ограничениях Supabase free tier.
+- Проверить работу при ограничениях VPS MySQL и Object Storage.
 
 ### Этап 3 — Миграция и cleanup
 - Включить dual-read.
 - Мигрировать старые файлы.
-- Мигрировать данные документов в Supabase.
+- Мигрировать данные документов во внешнюю MySQL.
 - Отключить постоянное хранение в локальной `storage`.
 - Отключить локальную БД как источник правды по документам.
 
 ---
 
-## 11. TODO лист (без RabbitMQ, с Supabase)
+## 11. TODO лист (без RabbitMQ, с VPS MySQL)
 
 ### Этап 0 — Подготовка S3
-- [ ] Выбрать провайдера S3 (`Yandex` для prod, `MinIO` для local).
-- [ ] Создать bucket `contracts-raw`.
-- [ ] Создать bucket `contracts-processed`.
-- [ ] Создать сервисный аккаунт `sa-contracts-storage`.
-- [ ] Выдать роль `storage.editor`.
-- [ ] Создать статические ключи доступа.
-- [ ] Настроить lifecycle policy.
-- [ ] Настроить CORS (если загрузка из браузера).
-- [ ] Пройти smoke-test (upload/head/download/delete).
+- [x] Выбрать провайдера S3 (`Yandex Object Storage` для prod, `MinIO` для local).
+- [x] Создать bucket `contracts-raw`.
+- [x] Создать bucket `contracts-processed`.
+- [x] Создать сервисный аккаунт `sa-contracts-storage`.
+- [x] Выдать роли Object Storage (`storage.editor`, `storage.admin`, `storage.uploader` на этапе настройки).
+- [x] Создать статические ключи доступа.
+- [x] Настроить KMS-доступ для `sa-contracts-storage` на оба KMS-ключа бакетов.
+- [x] Настроить lifecycle policy.
+- [x] Настроить CORS для локального фронта (`http://localhost:5173`, `http://localhost:3000`).
+- [x] Пройти smoke-test (list/upload/head/download/delete).
 
-### Этап 1 — Подготовка Supabase
-- [ ] Создать проект Supabase (free).
-- [ ] Получить `DATABASE_URL` (pooler) и `DIRECT_URL` (direct).
-- [ ] Проверить подключение с `sslmode=require`.
-- [ ] Добавить секреты Supabase в env/CI.
-- [ ] Проверить лимиты free tier под ожидаемую нагрузку.
+### Этап 1 — Подготовка VPS MySQL
+- [x] Поднять/подключить внешнюю MySQL на VPS.
+- [x] Получить и прописать `DATABASE_URL`.
+- [x] Проверить подключение Prisma к VPS MySQL.
+- [x] Применить Prisma migrations к VPS MySQL.
+- [x] Добавить секреты VPS MySQL и S3 в локальный env.
+- [ ] Добавить production secrets VPS MySQL и S3 в env/CI перед деплоем.
+- [x] Проверить runtime-запуск backend и запросы к VPS MySQL.
 
 ### Этап 2 — Модель данных
-- [ ] Добавить migration таблицы `documents`.
-- [ ] Добавить migration таблицы `document_contents`.
-- [ ] Добавить индексы (`object_key`, `status`, `owner_id`).
-- [ ] Добавить статусы `uploaded|processing|done|failed`.
-- [ ] Применить миграции в Supabase.
+- [x] Добавить migration таблицы `documents`.
+- [x] Добавить migration таблицы `document_contents`.
+- [x] Добавить индексы (`object_key`, `status`, `owner_id`).
+- [x] Добавить статусы `uploaded|processing|done|failed`.
+- [x] Применить миграции во внешней MySQL.
 
 ### Этап 3 — Backend и storage
 - [ ] Создать интерфейс `StorageService`.
 - [ ] Реализовать `S3StorageService`.
 - [ ] Оставить `LocalStorageService` для fallback/dev.
-- [ ] Переключить работу с БД документов на Supabase.
+- [ ] Переключить работу с БД документов на VPS MySQL.
 - [ ] Реализовать `POST /documents/upload-url`.
 - [ ] Реализовать `POST /documents/:id/complete`.
 - [ ] Реализовать `GET /documents/:id/status`.
@@ -305,16 +310,17 @@ DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.
 - [ ] Переключить новые загрузки на S3.
 - [ ] Мигрировать старые файлы из локальной `storage`.
 - [ ] Сверить checksum/размер после переноса.
-- [ ] Мигрировать метаданные документов в Supabase.
+- [ ] Мигрировать метаданные документов во внешнюю MySQL.
 - [ ] Проверить целостность данных (count/status/checksum).
 - [ ] Переключить чтение полностью на S3.
 - [ ] Удалить legacy-файлы после периода наблюдения.
 
 ### Этап 6 — Тестирование и запуск
+- [ ] Добавить production secrets VPS MySQL и S3 в env/CI перед деплоем.
 - [ ] E2E: upload -> complete -> processing -> done.
 - [ ] E2E: upload -> complete -> failed (контролируемая ошибка).
 - [ ] Нагрузочный тест на конкурентные загрузки.
-- [ ] Проверить ограничения Supabase free tier в пиковых сценариях.
+- [ ] Проверить ограничения VPS MySQL и Object Storage в пиковых сценариях.
 - [ ] Проверить рост локального диска (не должен расти от документов).
 - [ ] Выкатить поэтапно в прод.
 
@@ -323,7 +329,7 @@ DATABASE_URL=postgresql://postgres.__PROJECT_REF__:__PASSWORD__@aws-0-xx.pooler.
 ## 12. Definition of Done (текущий этап)
 
 - Файлы хранятся в S3, а не в локальной `storage`.
-- Метаданные и статусы документов хранятся в Supabase PostgreSQL.
+- Метаданные и статусы документов хранятся во внешней VPS MySQL.
 - Upload идет через presigned URL.
 - Статусы обработки отражаются через API (`processing/done/failed`).
 - Legacy-данные мигрированы и проверены.
