@@ -154,7 +154,7 @@ test("zero to approved critical path", async ({ page }) => {
   await page.goto("/auth");
   await expect(page.getByText("Доступ в систему").first()).toBeVisible({ timeout: 15_000 });
 
-  await page.getByLabel("Email или логин").fill("employee@test.local");
+  await page.getByLabel("Email").fill("employee@test.local");
   await page.getByLabel("Пароль").fill("test-password");
   await page.getByRole("button", { name: "Войти" }).click();
 

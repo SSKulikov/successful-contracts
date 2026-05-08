@@ -1,6 +1,6 @@
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Table, Tabs, Timeline, Typography, Upload, message } from "antd";
+import { Button, Card, Col, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Steps, Table, Tabs, Timeline, Typography, Upload, message } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { MockApiBanner } from "../shared/components/MockApiBanner";
@@ -185,9 +185,7 @@ export function DocumentDetailsPage() {
   const st = data?.status;
   const canWithdraw =
     data?.canWithdrawDocuments === true || (data?.canWithdrawDocuments === undefined && st === "На согласовании");
-  const canDelete =
-    data?.canDeleteDocuments === true ||
-    (data?.canDeleteDocuments === undefined && (st === "Загружен" || st === "На доработке"));
+  const canDelete = data != null && data.canDeleteDocuments !== false;
   const canSubmit = data?.canSubmitForApproval === true || (data?.canSubmitForApproval === undefined && st === "Загружен");
   const canResubmit =
     data?.canResubmitForApproval === true || (data?.canResubmitForApproval === undefined && st === "На доработке");
@@ -273,7 +271,7 @@ export function DocumentDetailsPage() {
         <Col xs={24} sm={12} md={6}>
           <Card size="small" className="doc-kpi-card">
             <Typography.Text type="secondary">Статус</Typography.Text>
-            <div>{data ? <StatusTag status={data.status} /> : "—"}</div>
+            <div style={{ marginTop: 8 }}>{data ? <StatusTag status={data.status} /> : "—"}</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
@@ -331,9 +329,9 @@ export function DocumentDetailsPage() {
 
         <Divider style={{ margin: "20px 0" }} />
 
-        <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+        <Divider plain titlePlacement="start" style={{ margin: "0 0 12px" }}>
           Действия
-        </Typography.Text>
+        </Divider>
         <Space wrap style={{ marginBottom: 8 }}>
           {data?.canEditDocumentFields ? (
             <Button ref={editDocumentButtonRef} disabled={actionInProgress} onClick={openEditModal}>
@@ -400,7 +398,9 @@ export function DocumentDetailsPage() {
           {canDelete ? (
             <Button
               danger
-              disabled={actionInProgress}
+              icon={<DeleteOutlined />}
+              disabled={actionInProgress || !id}
+              aria-label="Удалить документ"
               onClick={() =>
                 confirmDangerAction({
                   title: "Удалить документ?",
@@ -423,44 +423,56 @@ export function DocumentDetailsPage() {
       </Card>
 
       <Card title="Реквизиты и сумма" className="doc-detail-card" loading={isLoading && !isError}>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="Тип">{data?.type ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Номер">{fields?.number ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Дата">{fields?.date ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Сумма">{formatMoney(data?.amount)}</Descriptions.Item>
-          <Descriptions.Item label="Предмет / основание" span={2}>
-            {fields?.subject ?? "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label="Примечание" span={2}>
-            {fields?.note?.trim() ? fields.note : "—"}
-          </Descriptions.Item>
-        </Descriptions>
-        <Divider plain titlePlacement="start">
-          Заказчик
-        </Divider>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="Наименование">{fields?.customerName ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="ИНН">{fields?.customerInn ?? "—"}</Descriptions.Item>
-        </Descriptions>
-        <Divider plain titlePlacement="start">
-          Исполнитель
-        </Divider>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="Наименование">{fields?.executorName ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="ИНН">{fields?.executorInn ?? "—"}</Descriptions.Item>
-        </Descriptions>
-        <Divider plain titlePlacement="start">
-          Служебное
-        </Divider>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }} size="middle">
-          <Descriptions.Item label="ID">{data?.id ?? "—"}</Descriptions.Item>
-          {data?.companyId != null ? (
-            <Descriptions.Item label="Компания (ID)">{data.companyId}</Descriptions.Item>
-          ) : null}
-          <Descriptions.Item label="Инициатор (контрагент в списке)">{data?.initiator ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="Создан">{formatDateTime(data?.createdAt)}</Descriptions.Item>
-          <Descriptions.Item label="Обновлен">{formatDateTime(data?.updatedAt)}</Descriptions.Item>
-        </Descriptions>
+        <Table
+          dataSource={[{ key: "main" }]}
+          pagination={false}
+          size="small"
+          style={{ tableLayout: "fixed" }}
+          columns={[
+            { title: "Тип", key: "type", width: "16.6%", render: () => data?.type ?? "—" },
+            { title: "Сумма", key: "amount", width: "16.6%", render: () => formatMoney(data?.amount) },
+            { title: "Примечание", key: "note", width: "16.6%", render: () => fields?.note?.trim() ? fields.note : "—" },
+            { title: "Номер", key: "number", width: "16.6%", render: () => fields?.number ?? "—" },
+            { title: "Предмет/основание", key: "subject", width: "16.6%", render: () => fields?.subject ?? "—" },
+            { title: "Дата", key: "date", width: "16.6%", render: () => fields?.date ?? "—" }
+          ]}
+        />
+        <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>Заказчик</Typography.Title>
+        <Table
+          dataSource={[{ key: "customer" }]}
+          pagination={false}
+          size="small"
+          style={{ tableLayout: "fixed" }}
+          columns={[
+            { title: "Наименование", key: "customerName", width: "50%", render: () => fields?.customerName ?? "—" },
+            { title: "ИНН", key: "customerInn", width: "50%", render: () => fields?.customerInn ?? "—" }
+          ]}
+        />
+        <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>Исполнитель</Typography.Title>
+        <Table
+          dataSource={[{ key: "executor" }]}
+          pagination={false}
+          size="small"
+          style={{ tableLayout: "fixed" }}
+          columns={[
+            { title: "Наименование", key: "executorName", width: "50%", render: () => fields?.executorName ?? "—" },
+            { title: "ИНН", key: "executorInn", width: "50%", render: () => fields?.executorInn ?? "—" }
+          ]}
+        />
+        <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>Служебное</Typography.Title>
+        <Table
+          dataSource={[{ key: "service" }]}
+          pagination={false}
+          size="small"
+          style={{ tableLayout: "fixed" }}
+          columns={[
+            { title: "ID", key: "id", width: "20%", render: () => data?.id ?? "—" },
+            { title: "Создан", key: "createdAt", width: "20%", render: () => data?.createdAt ?? "—" },
+            { title: "Компания", key: "company", width: "20%", render: () => data?.companyInn ?? (data?.companyId != null ? String(data.companyId) : "—") },
+            { title: "Обновлен", key: "updatedAt", width: "20%", render: () => data?.updatedAt ?? "—" },
+            { title: "Инициатр (контрагент в списке)", key: "initiator", width: "20%", render: () => data?.initiator ?? "—" }
+          ]}
+        />
       </Card>
 
       <Card className="doc-detail-card" loading={isLoading && !isError}>
@@ -508,7 +520,7 @@ export function DocumentDetailsPage() {
                         key: "open",
                         width: 120,
                         render: (_, row: { url: string }) => (
-                          <Button type="link" onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}>
+                          <Button type="link" style={{ paddingLeft: 0 }} onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}>
                             Открыть
                           </Button>
                         )

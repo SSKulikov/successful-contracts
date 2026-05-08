@@ -162,6 +162,40 @@ export async function deleteCompanyAdminEmployee(req: Request, res: Response): P
   }
 }
 
+export async function resetCompanyAdminEmployeePassword(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureEmployeesTable();
+    const guard = requireCompanyAdmin(req, res);
+    if (!guard) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ message: "Некорректный id" });
+      return;
+    }
+    const rows = await prisma.$queryRawUnsafe<Array<{ id: number; company_id: number | null; deleted_at: Date | null }>>(
+      `SELECT id, company_id, deleted_at FROM employees WHERE id = ? LIMIT 1`,
+      id
+    );
+    const employee = rows[0];
+    if (!employee || employee.company_id !== guard.companyId || employee.deleted_at) {
+      res.status(404).json({ message: "Сотрудник не найден" });
+      return;
+    }
+    const oneTimePassword = generateOneTimePassword();
+    const passwordHash = await hashPassword(oneTimePassword);
+    await prisma.$executeRawUnsafe(
+      `UPDATE employees SET password_value = ?, is_temporary_password = 1 WHERE id = ? AND company_id = ? AND deleted_at IS NULL`,
+      passwordHash,
+      id,
+      guard.companyId
+    );
+    res.json({ message: "Одноразовый пароль обновлен", oneTimePassword });
+  } catch (error) {
+    logger.error(`❌ Ошибка сброса пароля сотрудника компании: ${error}`);
+    res.status(500).json({ message: "Ошибка сброса пароля сотрудника компании" });
+  }
+}
+
 export async function getMyCompanyProfile(req: Request, res: Response): Promise<void> {
   try {
     const guard = requireCompanyAdmin(req, res);

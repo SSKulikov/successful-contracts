@@ -31,6 +31,59 @@ const validator = new ValidatorService();
 const RASTER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const SUPPORTED_LLM_PROVIDERS = new Set(["gigachat", "yagpt"]);
 
+function normalizeDetectedDocumentType(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  const normalized = value.toLowerCase().replace(/ё/g, "е");
+  const hasInvoiceFacture =
+    normalized.includes("счет-фактур") || /счет\w*\s+фактур/.test(normalized);
+  const hasInvoicePayment =
+    /счет\s*(на)?\s*оплат/.test(normalized) || normalized.includes("инвойс");
+  const hasUniversalTransferDocPhrase =
+    /универсальн\w*[\s.,:;/-]*передаточн\w*[\s.,:;/-]*документ/.test(normalized) ||
+    (normalized.includes("универсальн") &&
+      normalized.includes("передаточн") &&
+      normalized.includes("документ"));
+  const hasUpD =
+    normalized.includes("упд") ||
+    hasUniversalTransferDocPhrase ||
+    // Частый шаблон УПД: одновременно есть признаки счета-фактуры и накладной.
+    (hasInvoiceFacture && normalized.includes("накладн")) ||
+    /\bстатус\s*[:\-]?\s*[12]\b/.test(normalized);
+  const hasInvoice = hasInvoiceFacture || hasInvoicePayment;
+  const hasNakladn =
+    /товарн\w*\s+накладн/.test(normalized) ||
+    /\bторг[\s-]*12\b/.test(normalized) ||
+    (normalized.includes("накладн") && !hasUpD && !hasInvoice);
+  const hasAct =
+    /акт\w*\s+(выполненн\w*\s+работ|оказанн\w*\s+услуг|прием\w*)/.test(normalized) ||
+    normalized.includes("акт");
+  const hasContract =
+    /(?:^|\n|\s)договор(?:\s|$|№|n)/.test(normalized) ||
+    /договор\w*\s*(поставк|оказан|подряд|аренд|купли[-\s]*продаж)/.test(normalized);
+
+  if (hasUpD) {
+    return "УПД";
+  }
+  if (hasInvoice) {
+    return "Счет на оплату";
+  }
+  if (hasNakladn) {
+    return "Накладная";
+  }
+  if (hasAct) {
+    return "Акт";
+  }
+  if (hasContract && !hasInvoice && !hasNakladn) return "Договор";
+  return null;
+}
+
+function detectDocumentTypeFromText(text: string): string | null {
+  const normalized = String(text ?? "").toLowerCase().replace(/ё/g, "е");
+  if (!normalized.trim()) return null;
+  return normalizeDetectedDocumentType(normalized);
+}
+
 function resolveLlmProvider(): "gigachat" | "yagpt" {
   const raw = (process.env.LLM_PROVIDER ?? "gigachat").trim().toLowerCase();
   if (SUPPORTED_LLM_PROVIDERS.has(raw)) {
@@ -125,7 +178,9 @@ async function parseFunc(filename: string, fileExtension: string, rasterSourceAb
 
     const result = res.value;
 
-    parsedData.contract_type ??= result.contract_type ?? null;
+    parsedData.contract_type ??=
+      normalizeDetectedDocumentType(result.contract_type) ??
+      null;
     parsedData.contract_number ??= result.contract_number ?? null;
     parsedData.contract_subject ??= result.contract_subject ?? null;
     parsedData.contract_sum ??= result.contract_sum ?? null;
@@ -164,6 +219,11 @@ async function parseFunc(filename: string, fileExtension: string, rasterSourceAb
     parsedData.customer.phone ??= result.customer?.phone ?? null;
     parsedData.customer.address ??= result.customer?.address ?? null;
     parsedData.customer.bank_name ??= result.customer?.bank_name ?? null;
+  }
+
+  if (!parsedData.contract_type) {
+    const fullText = documentArr.join(" ");
+    parsedData.contract_type = detectDocumentTypeFromText(fullText);
   }
 
   return validator.validateParsedData(parsedData);

@@ -1,5 +1,6 @@
 import { DesktopOutlined, LogoutOutlined, MoonOutlined, SunOutlined, UserOutlined } from "@ant-design/icons";
-import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, message, Space, Typography } from "antd";
+import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Menu, message, Space, Typography } from "antd";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -7,6 +8,7 @@ import {
   AUTH_USER_STORAGE_KEY,
   USER_PROFILE_UPDATED_CLIENT_EVENT,
   USER_ROLE_STORAGE_KEY,
+  approvalsApi,
   getStoredUserProfile,
   isPlatformAdminUser
 } from "../api";
@@ -38,6 +40,16 @@ export function AppLayout() {
   );
 
   const user = getStoredUserProfile();
+  const isPlatformAdmin = Boolean(user && isPlatformAdminUser(user));
+  const { data: approvalsBadgeTotal = 0 } = useQuery({
+    queryKey: ["my-approvals", "sidebar-badge-total"],
+    queryFn: async () => {
+      const result = await approvalsApi.listMyApprovals({ page: 1, pageSize: 1 });
+      return Number(result.meta.total ?? 0);
+    },
+    enabled: !hideSidebar && !isPlatformAdmin
+  });
+
   const tenantMenuItems = useMemo(
     () => [
       {
@@ -45,7 +57,14 @@ export function AppLayout() {
         label: "Документы",
         children: [
           { key: "/my-documents", label: "Мои документы" },
-          { key: "/my-approvals", label: "В работе" }
+          {
+            key: "/my-approvals",
+            label: (
+              <Badge count={approvalsBadgeTotal > 0 ? approvalsBadgeTotal : 0} showZero={false} size="small" offset={[10, -1]}>
+                <span>В работе</span>
+              </Badge>
+            )
+          }
         ]
       },
       ...(user?.role === "admin" && user.companyId != null
@@ -63,11 +82,11 @@ export function AppLayout() {
         children: [{ key: "/profile", label: "Профиль" }]
       }
     ],
-    [user?.role, user?.companyId]
+    [approvalsBadgeTotal, user?.role, user?.companyId]
   );
 
   const mustChangePassword = Boolean(user?.mustChangePassword);
-  const menuItems = user && isPlatformAdminUser(user) ? platformMenuItems : tenantMenuItems;
+  const menuItems = isPlatformAdmin ? platformMenuItems : tenantMenuItems;
   const gatedMenuItems = mustChangePassword
     ? menuItems.map((item) => ({
         ...item,
@@ -82,7 +101,7 @@ export function AppLayout() {
     "/documents": "Карточка документа",
     "/my-approvals": "В работе",
     "/profile": "Профиль",
-    "/admin-panel": user && isPlatformAdminUser(user) ? "Управление компаниями" : "Управление компанией",
+    "/admin-panel": isPlatformAdmin ? "Управление компаниями" : "Управление компанией",
     "/workspace": "Рабочее место"
   };
   const breadcrumbLabel =

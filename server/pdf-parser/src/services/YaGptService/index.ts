@@ -19,6 +19,27 @@ export class YaGptService {
 
   async main() {}
 
+  private parseModelJson(raw: string) {
+    const text = String(raw ?? "").trim();
+    if (!text) {
+      throw new Error("Пустой ответ от модели");
+    }
+
+    const unwrapped = text.replace(/```json|```/gi, "").trim();
+    const jsonStart = unwrapped.indexOf("{");
+    const jsonEnd = unwrapped.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+      throw new Error("В ответе модели не найден валидный JSON-объект");
+    }
+
+    const candidate = unwrapped.slice(jsonStart, jsonEnd + 1).trim();
+    if (!candidate) {
+      throw new Error("В ответе модели найден пустой JSON-кандидат");
+    }
+
+    return JSON.parse(candidate);
+  }
+
   private async getAccessToken() {
     if (!this.oAuthToken && this.bearerToken) {
       return;
@@ -100,8 +121,7 @@ export class YaGptService {
           .replace(/```/g, "")
           .trim();
 
-        // Парсим чистую строку
-        dataResult = JSON.parse(cleanText);
+        dataResult = this.parseModelJson(cleanText);
         break;
       } catch (err) {
         console.error(err);

@@ -36,6 +36,7 @@ export function PlatformCompaniesPage() {
           type="link"
           danger
           icon={<DeleteOutlined />}
+          style={{ paddingLeft: 0 }}
           loading={deleteCompanyMutation.isPending && deleteCompanyMutation.variables === record.key}
           onClick={() =>
             confirmDangerAction({

@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { DeleteOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -44,6 +44,27 @@ export function CompanyManagementPage() {
       queryClient.invalidateQueries({ queryKey: ["company-admin-employees"] });
     }
   });
+  const resetEmployeePassword = useMutation({
+    mutationFn: adminApi.resetCompanyAdminEmployeePassword,
+    onSuccess: (data, _employeeId) => {
+      if (data.oneTimePassword) {
+        setLastIssuedPassword(data.oneTimePassword);
+        message.success("Одноразовый пароль сгенерирован");
+        message.info(`Одноразовый пароль: ${data.oneTimePassword}`);
+      } else {
+        message.success("Пароль сотрудника обновлен");
+      }
+      queryClient.invalidateQueries({ queryKey: ["company-admin-employees"] });
+      queryClient.invalidateQueries({ queryKey: ["users", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["my-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["company-profile"] });
+    },
+    onError: () => {
+      message.error("Не удалось сгенерировать одноразовый пароль");
+    }
+  });
   const createRoute = useMutation({
     mutationFn: adminApi.createCompanyRoute,
     onSuccess: () => {
@@ -75,9 +96,14 @@ export function CompanyManagementPage() {
       title: "Действия",
       key: "actions",
       render: (_, row) => (
-        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteEmployee.mutate(row.key)}>
-          Удалить
-        </Button>
+        <Space size={4}>
+          <Button type="link" icon={<KeyOutlined />} loading={resetEmployeePassword.isPending} onClick={() => resetEmployeePassword.mutate(row.key)} style={{ paddingLeft: 0 }}>
+            Смена пароля
+          </Button>
+          <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteEmployee.mutate(row.key)}>
+            Удалить
+          </Button>
+        </Space>
       )
     }
   ];
@@ -90,7 +116,7 @@ export function CompanyManagementPage() {
       title: "Действия",
       key: "actions",
       render: (_, row) => (
-        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteRoute.mutate(row.id)}>
+        <Button danger type="link" icon={<DeleteOutlined />} onClick={() => deleteRoute.mutate(row.id)} style={{ paddingLeft: 0 }}>
           Удалить
         </Button>
       )
@@ -122,29 +148,30 @@ export function CompanyManagementPage() {
                       <Form.Item name="roles" label="Роли" rules={[{ required: true }]} style={{ minWidth: 280 }}>
                         <Select mode="multiple" options={ROLE_OPTIONS} />
                       </Form.Item>
-                      <Form.Item label=" " style={{ alignSelf: "flex-end" }}>
-                        <Button
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          loading={createEmployee.isPending}
-                          onClick={async () => createEmployee.mutate(await employeeForm.validateFields())}
-                        >
-                          Создать сотрудника
-                        </Button>
-                      </Form.Item>
                     </Space>
+                    <div style={{ marginTop: 0 }}>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        loading={createEmployee.isPending}
+                        onClick={async () => createEmployee.mutate(await employeeForm.validateFields())}
+                      >
+                        Создать сотрудника
+                      </Button>
+                    </div>
                     <div style={{ marginTop: 12, maxWidth: 520 }}>
                       <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>
                         Сгенерированный одноразовый пароль
                       </Typography.Text>
-                      <Input value={lastIssuedPassword ?? "Появится после создания сотрудника"} readOnly />
+                      <Input value={lastIssuedPassword ?? "Появится после создания сотрудника или смены пароля"} readOnly />
                     </div>
                     {lastIssuedPassword ? (
                       <Alert
                         style={{ marginTop: 12, maxWidth: 520 }}
                         type="info"
                         showIcon
-                        message="Передайте пароль сотруднику для первого входа."
+                        message="Передайте пароль сотруднику для входа."
+                        description="До смены одноразового пароля сотрудником действия в системе будут заблокированы."
                       />
                     ) : null}
                   </Form>
@@ -197,31 +224,29 @@ export function CompanyManagementPage() {
                               ) : null}
                             </Space>
                           ))}
-                          <div style={{ marginBottom: 8 }}>
+                          <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ assigneeKind: "employee" })}>
                               Добавить шаг
+                            </Button>
+                            <Button type="primary" loading={createRoute.isPending} onClick={async () => {
+                              const values = await routeForm.validateFields();
+                              createRoute.mutate({
+                                name: values.name,
+                                isDefault: values.isDefault === true,
+                                documentType: values.documentType ?? null,
+                                steps: (values.steps ?? []).map((s: { assigneeKind: "employee"; assigneeEmployeeId: number }, i: number) => ({
+                                  stepOrder: i + 1,
+                                  assigneeKind: s.assigneeKind,
+                                  assigneeEmployeeId: s.assigneeEmployeeId
+                                }))
+                              });
+                            }}>
+                              Сохранить маршрут
                             </Button>
                           </div>
                         </Space>
                       )}
                     </Form.List>
-                    <div style={{ marginTop: 12 }}>
-                      <Button type="primary" loading={createRoute.isPending} onClick={async () => {
-                        const values = await routeForm.validateFields();
-                        createRoute.mutate({
-                          name: values.name,
-                          isDefault: values.isDefault === true,
-                          documentType: values.documentType ?? null,
-                          steps: (values.steps ?? []).map((s: { assigneeKind: "employee"; assigneeEmployeeId: number }, i: number) => ({
-                            stepOrder: i + 1,
-                            assigneeKind: s.assigneeKind,
-                            assigneeEmployeeId: s.assigneeEmployeeId
-                          }))
-                        });
-                      }}>
-                        Сохранить маршрут
-                      </Button>
-                    </div>
                   </Form>
                 </Card>
                 <Card title="Список маршрутов">
