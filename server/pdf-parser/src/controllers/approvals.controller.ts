@@ -82,6 +82,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
         type: string;
         number_value: string;
         customer_name: string;
+        executor_name: string | null;
         amount: string;
         created_at: Date;
         step_order: number;
@@ -97,6 +98,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
           d.type,
           d.number_value,
           d.customer_name,
+          d.executor_name,
           CAST(d.amount AS CHAR) AS amount,
           t.created_at,
           t.step_order,
@@ -130,6 +132,7 @@ export async function listMyApprovals(req: Request, res: Response): Promise<void
       type: row.type,
       title: `${row.type} №${row.number_value}`,
       initiator: row.initiator_display ?? `Сотрудник №${row.created_by}`,
+      executorName: row.executor_name ?? undefined,
       amount: row.amount,
       waitingDays: Number(row.waiting_days),
       currentStep: `Шаг ${row.step_order}`,

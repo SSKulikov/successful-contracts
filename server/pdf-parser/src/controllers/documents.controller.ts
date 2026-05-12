@@ -516,12 +516,13 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
         date_value: string;
         status: DocumentStatus;
         customer_name: string;
+        executor_name: string;
         amount: string;
         created_at: Date;
       }>
     >(
       `
-        SELECT d.id, d.company_id, d.type, d.number_value, d.status, d.customer_name, CAST(d.amount AS CHAR) AS amount, d.created_at
+        SELECT d.id, d.company_id, d.type, d.number_value, d.status, d.customer_name, d.executor_name, CAST(d.amount AS CHAR) AS amount, d.created_at
         FROM approval_documents d
         ${whereClause}
         ORDER BY d.created_at DESC
@@ -536,6 +537,7 @@ export async function listMyDocuments(req: Request, res: Response): Promise<void
       title: `${row.type} №${row.number_value}`,
       status: row.status,
       counterparty: row.customer_name,
+      executorName: row.executor_name,
       amount: row.amount,
       createdAt: row.created_at
     }));
