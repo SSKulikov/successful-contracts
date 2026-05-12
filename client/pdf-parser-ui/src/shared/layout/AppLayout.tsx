@@ -1,5 +1,5 @@
 import { DesktopOutlined, LogoutOutlined, MoonOutlined, SunOutlined, UserOutlined } from "@ant-design/icons";
-import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Menu, message, Space, Typography } from "antd";
+import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, message, Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -7,6 +7,7 @@ import {
   AUTH_TOKEN_STORAGE_KEY,
   AUTH_USER_STORAGE_KEY,
   USER_PROFILE_UPDATED_CLIENT_EVENT,
+  VIEWED_DOCS_UPDATED_CLIENT_EVENT,
   USER_ROLE_STORAGE_KEY,
   approvalsApi,
   getStoredUserProfile,
@@ -20,6 +21,7 @@ export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [profileVersion, setProfileVersion] = useState(0);
+  const [viewedDocsVersion, setViewedDocsVersion] = useState(0);
 
   const hideSidebar = location.pathname === "/" || location.pathname === "/auth";
   const showHeader = hideSidebar;
@@ -41,14 +43,27 @@ export function AppLayout() {
 
   const user = getStoredUserProfile();
   const isPlatformAdmin = Boolean(user && isPlatformAdminUser(user));
-  const { data: approvalsBadgeTotal = 0 } = useQuery({
-    queryKey: ["my-approvals", "sidebar-badge-total"],
-    queryFn: async () => {
-      const result = await approvalsApi.listMyApprovals({ page: 1, pageSize: 1 });
-      return Number(result.meta.total ?? 0);
-    },
-    enabled: !hideSidebar && !isPlatformAdmin
+  const { data: approvalsData } = useQuery({
+    queryKey: ["my-approvals", "sidebar-badge"],
+    queryFn: () => approvalsApi.listMyApprovals({ page: 1, pageSize: 100 }),
+    enabled: !hideSidebar && !isPlatformAdmin,
+    refetchInterval: 45_000
   });
+
+  const approvalsBadgeTotal = approvalsData?.meta.total ?? 0;
+
+  // viewedDocsVersion используется как триггер перерасчёта при изменении localStorage
+  const hasUnreadApprovals = (() => {
+    void viewedDocsVersion;
+    if (!approvalsData?.items.length) return false;
+    try {
+      const raw = localStorage.getItem("viewed-documents");
+      const viewed: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+      return approvalsData.items.some((item) => item.documentId && !viewed.includes(item.documentId));
+    } catch {
+      return false;
+    }
+  })();
 
   const tenantMenuItems = useMemo(
     () => [
@@ -56,33 +71,34 @@ export function AppLayout() {
         type: "group" as const,
         label: "Документы",
         children: [
-          { key: "/my-documents", label: "Мои документы" },
+          { key: "/my-documents", label: "Все документы" },
           {
             key: "/my-approvals",
             label: (
-              <Badge count={approvalsBadgeTotal > 0 ? approvalsBadgeTotal : 0} showZero={false} size="small" offset={[10, -1]}>
-                <span>В работе</span>
-              </Badge>
+              <span>
+                На согласовании
+                {approvalsBadgeTotal > 0 && (
+                  <span style={{ marginLeft: 8, fontWeight: hasUnreadApprovals ? 700 : 400, fontSize: 12 }}>
+                    {approvalsBadgeTotal}
+                  </span>
+                )}
+              </span>
             )
           }
         ]
       },
-      ...(user?.role === "admin" && user.companyId != null
-        ? [
-            {
-              type: "group" as const,
-              label: "Управление",
-              children: [{ key: "/admin-panel", label: "Управление компанией" }]
-            }
-          ]
-        : []),
       {
         type: "group" as const,
-        label: "Профиль",
-        children: [{ key: "/profile", label: "Профиль" }]
+        label: "Управление",
+        children: [
+          ...(user?.role === "admin" && user.companyId != null
+            ? [{ key: "/admin-panel", label: "Профиль компании" }]
+            : []),
+          { key: "/profile", label: "Личный профиль" }
+        ]
       }
     ],
-    [approvalsBadgeTotal, user?.role, user?.companyId]
+    [approvalsBadgeTotal, hasUnreadApprovals, user?.role, user?.companyId]
   );
 
   const mustChangePassword = Boolean(user?.mustChangePassword);
@@ -97,9 +113,9 @@ export function AppLayout() {
     : menuItems;
 
   const breadcrumbMap: Record<string, string> = {
-    "/my-documents": "Мои документы",
+    "/my-documents": "Все документы",
     "/documents": "Карточка документа",
-    "/my-approvals": "В работе",
+    "/my-approvals": "На согласовании",
     "/profile": "Профиль",
     "/admin-panel": isPlatformAdmin ? "Управление компаниями" : "Управление компанией",
     "/workspace": "Рабочее место"
@@ -115,6 +131,12 @@ export function AppLayout() {
       window.removeEventListener(USER_PROFILE_UPDATED_CLIENT_EVENT, syncProfileState);
       window.removeEventListener("storage", syncProfileState);
     };
+  }, []);
+
+  useEffect(() => {
+    const syncViewedDocs = () => setViewedDocsVersion((v) => v + 1);
+    window.addEventListener(VIEWED_DOCS_UPDATED_CLIENT_EVENT, syncViewedDocs);
+    return () => window.removeEventListener(VIEWED_DOCS_UPDATED_CLIENT_EVENT, syncViewedDocs);
   }, []);
 
   useEffect(() => {

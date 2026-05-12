@@ -10,6 +10,7 @@ export type DocumentRow = {
   type: string;
   title: string;
   initiator: string;
+  executorName?: string;
   amount: string;
   status: DocumentStatus;
   createdAt?: string;
@@ -116,6 +117,7 @@ export type ApprovalRow = {
   type: string;
   title: string;
   initiator: string;
+  executorName?: string;
   /** Сумма по документу (как в БД, строка). */
   amount: string;
   /** Полных календарных дней с даты назначения задачи (по серверной дате). */
@@ -284,6 +286,8 @@ export const PROFILE_PASSWORD_REQUIRED_QUERY = "mustSetPassword";
 export const PASSWORD_CHANGE_REQUIRED_CLIENT_EVENT = "docflow-password-change-required";
 /** Событие на `window`: профиль в localStorage обновлён, UI должен перечитать `mustChangePassword`/роль. */
 export const USER_PROFILE_UPDATED_CLIENT_EVENT = "docflow-user-profile-updated";
+/** Событие на `window`: список просмотренных документов в localStorage обновлён. */
+export const VIEWED_DOCS_UPDATED_CLIENT_EVENT = "docflow-viewed-docs-updated";
 
 const httpClient = axios.create({
   baseURL: API_BASE_URL
@@ -325,6 +329,7 @@ const mockDocuments: DocumentRow[] = [
     type: "Договор",
     title: "Договор поставки №101",
     initiator: "Иван Петров",
+    executorName: "ООО Исполнитель",
     amount: "1 250 000 ₽",
     status: "На согласовании"
   },
@@ -334,6 +339,7 @@ const mockDocuments: DocumentRow[] = [
     type: "Счет на оплату",
     title: "Счет на оплату №44",
     initiator: "Иван Петров",
+    executorName: "ООО Поставщик",
     amount: "320 000 ₽",
     status: "На доработке"
   },
@@ -343,6 +349,7 @@ const mockDocuments: DocumentRow[] = [
     type: "Акт",
     title: "Акт выполненных работ №18",
     initiator: "Мария Соколова",
+    executorName: "ИП Смирнов А.В.",
     amount: "780 000 ₽",
     status: "Согласован"
   }
@@ -375,6 +382,7 @@ const mockApprovals: ApprovalRow[] = [
     type: "Договор",
     title: "Договор поставки №101",
     initiator: "Иван Петров",
+    executorName: "ООО Исполнитель",
     amount: "1 250 000 ₽",
     waitingDays: 3,
     currentStep: "Финансист",
@@ -389,6 +397,7 @@ const mockApprovals: ApprovalRow[] = [
     type: "УПД",
     title: "УПД №890",
     initiator: "Мария Соколова",
+    executorName: "ООО Поставщик",
     amount: "98 400 ₽",
     waitingDays: 0,
     currentStep: "Юрист",
@@ -609,6 +618,7 @@ export const documentsApi = {
       type: item.type,
       title: item.title,
       initiator: item.initiator ?? item.counterparty ?? "-",
+      executorName: (item as { executorName?: string }).executorName,
       amount: item.amount,
       status: mapStatusFromApi(String(item.status)),
       createdAt: (item as { createdAt?: string }).createdAt
