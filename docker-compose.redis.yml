@@ -1,0 +1,29 @@
+# Только Redis на VPS (MySQL у вас уже на хосте / отдельно).
+#
+# Запуск из корня репозитория:
+#   docker compose -f docker-compose.redis.yml up -d
+#
+# На той же машине, где крутится Node API, в server/pdf-parser/.env:
+#   REDIS_URL=redis://127.0.0.1:6379
+# (порт совпадает с REDIS_PORT ниже, если меняете — поправьте URL.)
+#
+# Безопасность: по умолчанию порт проброшен только на 127.0.0.1 хоста.
+# Если Redis должен быть доступен с другой машины — выставьте REDIS_BIND=0.0.0.0
+# и обязательно задайте пароль (см. комментарий у command) + firewall только к нужным IP.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_BIND:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_vps_data:/data
+    # Персистентность (AOF), как в основном docker-compose.yml.
+    # С паролем замените command на:
+    #   ["redis-server", "--appendonly", "yes", "--requirepass", "СИЛЬНЫЙ_ПАРОЛЬ"]
+    # и в REDIS_URL: redis://:СИЛЬНЫЙ_ПАРОЛЬ@127.0.0.1:6379
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  redis_vps_data:

@@ -459,20 +459,6 @@ export function DocumentDetailsPage() {
             { title: "ИНН", key: "executorInn", width: "50%", render: () => fields?.executorInn ?? "—" }
           ]}
         />
-        <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 8 }}>Служебное</Typography.Title>
-        <Table
-          dataSource={[{ key: "service" }]}
-          pagination={false}
-          size="small"
-          style={{ tableLayout: "fixed" }}
-          columns={[
-            { title: "ID", key: "id", width: "20%", render: () => data?.id ?? "—" },
-            { title: "Создан", key: "createdAt", width: "20%", render: () => data?.createdAt ?? "—" },
-            { title: "Компания", key: "company", width: "20%", render: () => data?.companyInn ?? (data?.companyId != null ? String(data.companyId) : "—") },
-            { title: "Обновлен", key: "updatedAt", width: "20%", render: () => data?.updatedAt ?? "—" },
-            { title: "Инициатр (контрагент в списке)", key: "initiator", width: "20%", render: () => data?.initiator ?? "—" }
-          ]}
-        />
       </Card>
 
       <Card className="doc-detail-card" loading={isLoading && !isError}>
