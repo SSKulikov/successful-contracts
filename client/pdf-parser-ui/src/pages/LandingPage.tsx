@@ -48,7 +48,7 @@ export function LandingPage() {
             <FileTextOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            Мои документы
+            Все документы
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
             Поиск, фильтры и полный список документов со всеми статусами.
@@ -60,7 +60,7 @@ export function LandingPage() {
             <SafetyOutlined className="landing-icon" />
           </div>
           <Typography.Title level={4} className="landing-card-title">
-            В работе
+            На согласовании
           </Typography.Title>
           <Typography.Paragraph className="landing-card-text">
             Задачи по согласованию: согласовать, отклонить или вернуть на доработку с комментарием.

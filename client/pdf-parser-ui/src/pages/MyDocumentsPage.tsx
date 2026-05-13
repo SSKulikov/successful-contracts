@@ -87,20 +87,20 @@ export function MyDocumentsPage() {
   const COLUMN_WIDTHS_STORAGE_KEY = "my-documents-column-widths";
   const VIEWED_KEY = "viewed-documents";
   const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
-    id: 92,
     type: 118,
     title: 148,
     initiator: 168,
+    executorName: 168,
     amount: 132,
     createdAt: 156,
     status: 146,
     actions: 320
   };
   const COLUMN_WIDTH_LIMITS: Record<string, { min: number; max: number }> = {
-    id: { min: 80, max: 130 },
     type: { min: 100, max: 170 },
     title: { min: 110, max: 190 },
     initiator: { min: 140, max: 220 },
+    executorName: { min: 140, max: 220 },
     amount: { min: 120, max: 180 },
     createdAt: { min: 140, max: 220 },
     status: { min: 130, max: 190 },
@@ -552,7 +552,6 @@ export function MyDocumentsPage() {
         />
       )
     },
-    { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id, sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.id, b.id) },
     {
       title: "Тип",
       dataIndex: "type",
@@ -581,6 +580,15 @@ export function MyDocumentsPage() {
       ellipsis: true,
       render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value}</Typography.Text>,
       sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.initiator, b.initiator)
+    },
+    {
+      title: "Исполнитель",
+      dataIndex: "executorName",
+      key: "executorName",
+      width: columnWidths.executorName,
+      ellipsis: true,
+      render: (value: string) => <Typography.Text ellipsis={{ tooltip: value }}>{value || "—"}</Typography.Text>,
+      sorter: (a: DocumentRow, b: DocumentRow) => sortByText(a.executorName ?? "", b.executorName ?? "")
     },
     {
       title: "Сумма",
@@ -729,7 +737,7 @@ export function MyDocumentsPage() {
   return (
     <div className="page-shell">
       <PageHeader
-        title="Мои документы"
+        title="Все документы"
         subtitle="Создавайте, фильтруйте и отправляйте документы на согласование."
       />
 

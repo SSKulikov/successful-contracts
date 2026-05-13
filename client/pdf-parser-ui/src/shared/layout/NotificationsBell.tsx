@@ -2,7 +2,7 @@ import { BellOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Drawer, Empty, List, Spin, Typography } from "antd";
 import dayjs from "dayjs";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { notificationsApi, type NotificationListItem } from "../api";
 
@@ -26,6 +26,14 @@ export function NotificationsBell() {
     queryFn: () => notificationsApi.getUnreadCount(),
     refetchInterval: UNREAD_POLL_MS
   });
+
+  const prevUnreadRef = useRef(unread);
+  useEffect(() => {
+    if (unread > prevUnreadRef.current) {
+      void queryClient.invalidateQueries({ queryKey: ["my-approvals"] });
+    }
+    prevUnreadRef.current = unread;
+  }, [unread, queryClient]);
 
   const {
     data: listData,

@@ -322,7 +322,7 @@ export function DocumentDetailsPage() {
               size="small"
               className="doc-detail-steps"
               current={workflowStepIndex(data?.status)}
-              items={[{ title: "Подготовка" }, { title: "Согласование" }, { title: "Итог" }]}
+              items={[{ title: "Загрузка" }, { title: "Согласование" }, { title: "Итог" }]}
             />
           </Space>
         </div>

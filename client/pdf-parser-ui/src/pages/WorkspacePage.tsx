@@ -44,12 +44,12 @@ export function WorkspacePage() {
   const tenantItems = [
     {
       key: "my-documents",
-      label: "Мои документы",
+      label: "Все документы",
       children: (
         <Card>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Button type="primary" onClick={() => navigate("/my-documents")}>
-              Перейти в мои документы
+              Перейти в все документы
             </Button>
           </Space>
         </Card>

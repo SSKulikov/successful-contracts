@@ -17,7 +17,7 @@ import { formatDateTime, formatMoney } from "../shared/utils/format";
 import { getApiErrorMessage } from "../shared/utils/api-error";
 import { ApiErrorState } from "../shared/components/ApiErrorState";
 import { confirmCommentAction } from "../shared/utils/confirm-actions";
-import { ApprovalRow, approvalsApi, documentsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
+import { ApprovalRow, VIEWED_DOCS_UPDATED_CLIENT_EVENT, approvalsApi, documentsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
 import { DOCUMENT_TYPE_SELECT_OPTIONS } from "../shared/documentTypes";
 
 function formatWaitingDays(days: number): string {
@@ -40,7 +40,6 @@ export function MyApprovalsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    id: 110,
     type: 130,
     title: 240,
     initiator: 190,
@@ -94,6 +93,7 @@ export function MyApprovalsPage() {
       if (prev.includes(docId)) return prev;
       const next = [...prev, docId];
       localStorage.setItem(VIEWED_KEY, JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent(VIEWED_DOCS_UPDATED_CLIENT_EVENT));
       return next;
     });
   };
@@ -273,7 +273,6 @@ export function MyApprovalsPage() {
         />
       )
     },
-    { title: "ID", dataIndex: "id", key: "id", width: columnWidths.id },
     {
       title: "Тип",
       dataIndex: "type",
@@ -345,7 +344,7 @@ export function MyApprovalsPage() {
   return (
     <div className="page-shell">
       <PageHeader
-        title="В работе"
+        title="На согласовании"
         subtitle="Документы, где от вас ожидается решение по этапу согласования."
       />
 
