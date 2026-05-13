@@ -21,6 +21,13 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** Тот же выбор провайдера, что у `getStorageService()` (S3 vs local). */
+export function isS3StorageEnabled(): boolean {
+  const defaultProvider = process.env.S3_ENDPOINT ? "s3" : "local";
+  const provider = (process.env.STORAGE_PROVIDER ?? defaultProvider).trim().toLowerCase();
+  return provider === "s3";
+}
+
 export function getStorageService(): StorageService {
   if (storageService) return storageService;
 

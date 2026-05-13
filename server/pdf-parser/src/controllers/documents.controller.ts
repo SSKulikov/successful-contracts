@@ -26,7 +26,7 @@ import { parseApproverEmployeeIds } from "../utils/parse-approver-employee-ids";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { getStorageService } from "../services/StorageService/factory";
+import { getStorageService, isS3StorageEnabled } from "../services/StorageService/factory";
 
 type DocumentStatus = "uploaded" | "in_approval" | "revision" | "rejected" | "approved";
 
@@ -1587,8 +1587,18 @@ export async function serveDocumentFile(req: Request, res: Response): Promise<vo
         res.redirect(downloadUrl);
         return;
       } catch (error) {
-        logger.warn(`S3 attachment read failed, falling back to local file ${fileName}: ${error}`);
+        logger.error(`S3 attachment read failed for ${fileName}: ${error}`);
+        res.status(502).json({ message: "Временная ошибка хранилища файла" });
+        return;
       }
+    }
+
+    if (isS3StorageEnabled()) {
+      res.status(404).json({
+        message:
+          "Вложение не привязано к Object Storage (нет bucket/object_key). Выполните миграцию вложений в S3 и синхронизацию метаданных."
+      });
+      return;
     }
 
     const filePath = localAttachmentPath(fileName);

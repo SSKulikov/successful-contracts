@@ -310,10 +310,18 @@ DATABASE_URL=mysql://USER:PASSWORD@VPS_HOST:3306/docflow
 - [x] Переключить новые загрузки на S3.
 - [x] Мигрировать старые файлы из локальной `storage`.
 - [x] Сверить checksum/размер после переноса.
-- [ ] Мигрировать метаданные документов во внешнюю MySQL.
-- [ ] Проверить целостность данных (count/status/checksum).
-- [ ] Переключить чтение полностью на S3.
-- [ ] Удалить legacy-файлы после периода наблюдения.
+- [x] Мигрировать метаданные документов во внешнюю MySQL.
+- [x] Проверить целостность данных (count/status/checksum).
+- [x] Переключить чтение полностью на S3.
+- [x] Удалить legacy-файлы после периода наблюдения.
+
+Операции (после переноса БД на VPS и смены ключей S3):
+
+1. При необходимости файлы вложений в бакет: `npm run migrate:attachments-to-s3` (из `server/pdf-parser`).
+2. Синхронизация полей `bucket` / `object_key` / `size_bytes` / `storage_provider` в MySQL из S3: `npm run sync:attachment-s3-metadata`.
+3. Проверка: `npm run verify:storage-integrity` (код выхода 1 при расхождениях или вложениях без S3-ключей).
+4. Выдача вложений в S3-режиме: локальный fallback для `GET /api/document-files/...` отключён; без ключей в БД — 404.
+5. Удаление локальных копий в `uploads/documents`: сначала `npm run cleanup:local-attachment-files` (dry-run), затем с флагом `--execute`.
 
 ### Этап 6 — Тестирование и запуск
 - [ ] Добавить production secrets VPS MySQL и S3 в env/CI перед деплоем.
