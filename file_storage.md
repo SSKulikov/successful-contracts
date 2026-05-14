@@ -324,12 +324,12 @@ DATABASE_URL=mysql://USER:PASSWORD@VPS_HOST:3306/docflow
 5. Удаление локальных копий в `uploads/documents`: сначала `npm run cleanup:local-attachment-files` (dry-run), затем с флагом `--execute`.
 
 ### Этап 6 — Тестирование и запуск
-- [ ] Добавить production secrets VPS MySQL и S3 в env/CI перед деплоем.
-- [ ] E2E: upload -> complete -> processing -> done.
-- [ ] E2E: upload -> complete -> failed (контролируемая ошибка).
-- [ ] Нагрузочный тест на конкурентные загрузки.
-- [ ] Проверить ограничения VPS MySQL и Object Storage в пиковых сценариях.
-- [ ] Проверить рост локального диска (не должен расти от документов).
+- [ ] Добавить production secrets VPS MySQL и S3 в env/CI перед деплоем. Кодовый guard и workflow добавлены; реальные значения нужно задать в GitHub Secrets/production env.
+- [x] E2E: upload -> complete -> processing -> done.
+- [x] E2E: upload -> complete -> failed (контролируемая ошибка).
+- [x] Нагрузочный тест на конкурентные загрузки.
+- [x] Проверить ограничения VPS MySQL и Object Storage в пиковых сценариях.
+- [x] Проверить рост локального диска (не должен расти от документов).
 - [ ] Выкатить поэтапно в прод.
 
 ---

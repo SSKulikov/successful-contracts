@@ -212,6 +212,25 @@ location /api/ {
 
 База данных в CI **не** поднимается: миграции не выполняются в pipeline, только проверка сборки. Деплой на staging/production по-прежнему: **`npm run migrate:deploy`** на целевой среде перед стартом процесса (как в Docker CMD образа API).
 
+### Storage smoke перед выкладкой
+
+Для проверки VPS MySQL + Object Storage добавлен ручной workflow **Storage Smoke** (`.github/workflows/storage-smoke.yml`, запуск через `workflow_dispatch`). Перед запуском в GitHub Secrets должны быть заданы:
+
+`DATABASE_URL`, `JWT_SECRET`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET_RAW`, `S3_BUCKET_PROCESSED`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `PUBLIC_APP_URL`, `CORS_ORIGIN`, `STAGING_API_URL`, `STAGING_EMAIL`, `STAGING_PASSWORD`.
+
+Workflow выполняет: `check:production-secrets`, `migrate:deploy`, `verify:storage-integrity`, `check:storage-limits`, `test:e2e:storage-flow`, `test:storage-load`.
+
+Локально тот же набор можно запустить из `server/pdf-parser` после старта API:
+
+```bash
+npm run check:production-secrets
+npm run migrate:deploy
+npm run verify:storage-integrity
+npm run check:storage-limits
+STAGING_API_URL=http://localhost:3003/api STAGING_EMAIL=... STAGING_PASSWORD=... npm run test:e2e:storage-flow
+STAGING_API_URL=http://localhost:3003/api STAGING_EMAIL=... STAGING_PASSWORD=... npm run test:storage-load
+```
+
 ---
 
 ## Staging как повторяемый процесс (чеклист)

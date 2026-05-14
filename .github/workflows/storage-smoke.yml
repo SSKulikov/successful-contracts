@@ -1,0 +1,42 @@
+name: Storage Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  storage-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/pdf-parser
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+      S3_REGION: ${{ secrets.S3_REGION }}
+      S3_BUCKET_RAW: ${{ secrets.S3_BUCKET_RAW }}
+      S3_BUCKET_PROCESSED: ${{ secrets.S3_BUCKET_PROCESSED }}
+      S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+      S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+      PUBLIC_APP_URL: ${{ secrets.PUBLIC_APP_URL }}
+      CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+      STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+      STAGING_EMAIL: ${{ secrets.STAGING_EMAIL }}
+      STAGING_PASSWORD: ${{ secrets.STAGING_PASSWORD }}
+      STORAGE_LOAD_TOTAL: ${{ vars.STORAGE_LOAD_TOTAL || '20' }}
+      STORAGE_LOAD_CONCURRENCY: ${{ vars.STORAGE_LOAD_CONCURRENCY || '5' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/pdf-parser/package-lock.json
+      - run: npm ci
+      - run: npm run prisma-generate
+      - run: npm run check:production-secrets
+      - run: npm run migrate:deploy
+      - run: npm run verify:storage-integrity
+      - run: npm run check:storage-limits
+      - run: npm run test:e2e:storage-flow
+      - run: npm run test:storage-load

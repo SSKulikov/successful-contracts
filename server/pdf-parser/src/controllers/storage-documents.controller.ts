@@ -111,50 +111,72 @@ async function processDocumentFromStorage(document: {
   const parserDir = resolveParserStorageDir(document.originalName, document.mimeType);
   const localPath = path.join(parserDir, storedFileName);
 
-  await fs.promises.mkdir(parserDir, { recursive: true });
-  await pipeline(
-    await storage.getObjectStream({
-      bucket: document.bucket,
-      key: document.objectKey
-    }),
-    fs.createWriteStream(localPath)
+  try {
+    await fs.promises.mkdir(parserDir, { recursive: true });
+    await pipeline(
+      await storage.getObjectStream({
+        bucket: document.bucket,
+        key: document.objectKey
+      }),
+      fs.createWriteStream(localPath)
+    );
+
+    const parsed = await parseStoredDocumentFile({
+      originalName: document.originalName,
+      storedFileName,
+      absolutePath: localPath
+    });
+
+    const processedBucket = getProcessedBucket();
+    const processedObjectKey = `documents/${document.ownerId}/${document.id}/parsed.json`;
+    const resultBody = JSON.stringify(
+      {
+        documentId: document.id,
+        parsedJson: parsed.parsedJson,
+        normalizedContentSha256: parsed.normalizedContentSha256,
+        contentSha256: parsed.contentSha256,
+        pipelineCacheHit: parsed.pipelineCacheHit,
+        extractedAt: new Date().toISOString()
+      },
+      null,
+      2
+    );
+
+    await storage.putObject({
+      bucket: processedBucket,
+      key: processedObjectKey,
+      body: resultBody,
+      contentType: "application/json; charset=utf-8",
+      contentLength: Buffer.byteLength(resultBody)
+    });
+
+    return {
+      parsed,
+      processedBucket,
+      processedObjectKey,
+      resultBody
+    };
+  } finally {
+    await cleanupParserArtifacts(document.id, localPath);
+  }
+}
+
+async function cleanupParserArtifacts(documentId: string, localPath: string): Promise<void> {
+  const candidates = [
+    localPath,
+    path.resolve(process.cwd(), "storage", "text", `${documentId}.txt`),
+    path.resolve(process.cwd(), "storage", "img", documentId)
+  ];
+
+  await Promise.all(
+    candidates.map(async (candidate) => {
+      try {
+        await fs.promises.rm(candidate, { force: true, recursive: true });
+      } catch (error) {
+        logger.warn(`Не удалось удалить временный файл парсинга ${candidate}: ${error}`);
+      }
+    })
   );
-
-  const parsed = await parseStoredDocumentFile({
-    originalName: document.originalName,
-    storedFileName,
-    absolutePath: localPath
-  });
-
-  const processedBucket = getProcessedBucket();
-  const processedObjectKey = `documents/${document.ownerId}/${document.id}/parsed.json`;
-  const resultBody = JSON.stringify(
-    {
-      documentId: document.id,
-      parsedJson: parsed.parsedJson,
-      normalizedContentSha256: parsed.normalizedContentSha256,
-      contentSha256: parsed.contentSha256,
-      pipelineCacheHit: parsed.pipelineCacheHit,
-      extractedAt: new Date().toISOString()
-    },
-    null,
-    2
-  );
-
-  await storage.putObject({
-    bucket: processedBucket,
-    key: processedObjectKey,
-    body: resultBody,
-    contentType: "application/json; charset=utf-8",
-    contentLength: Buffer.byteLength(resultBody)
-  });
-
-  return {
-    parsed,
-    processedBucket,
-    processedObjectKey,
-    resultBody
-  };
 }
 
 export async function createDocumentUploadUrl(req: Request, res: Response): Promise<void> {

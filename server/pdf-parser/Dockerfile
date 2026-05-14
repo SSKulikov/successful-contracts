@@ -1,5 +1,5 @@
 # API pdf-parser: Express + Prisma + OCR/parse зависимостей (GraphicsMagick для pdf2pic)
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
