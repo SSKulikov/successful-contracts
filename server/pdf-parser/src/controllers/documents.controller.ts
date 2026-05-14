@@ -318,12 +318,37 @@ function getRawBucket(): string {
 }
 
 function normalizeUploadedOriginalName(fileName: string): string {
+  const original = String(fileName ?? "").trim();
+  if (!original) return "document";
+  if (/[\u0400-\u04FF]/.test(original)) return original;
+
   try {
-    const decoded = Buffer.from(fileName, "latin1").toString("utf8");
-    return decoded.trim() || fileName;
+    const decoded = Buffer.from(original, "latin1").toString("utf8").trim();
+    if (decoded && !/[\u0000-\u001F\u007F]/.test(decoded)) {
+      return decoded;
+    }
+    return original;
   } catch {
-    return fileName;
+    return original;
   }
+}
+
+function sanitizeAttachmentDownloadFileName(fileName: string): string {
+  const fallback = String(fileName || "document")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/[\x00-\x1F\x7F"\\;]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (fallback || "document").slice(0, 160);
+}
+
+function buildAttachmentContentDisposition(fileName: string): string {
+  const normalized = normalizeUploadedOriginalName(fileName).replace(/[\u0000-\u001F\u007F]+/g, "_");
+  const fallback = sanitizeAttachmentDownloadFileName(normalized);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(normalized)}`;
 }
 
 function buildAttachmentPublicUrl(req: Request, fileName: string): string {
@@ -1582,7 +1607,7 @@ export async function serveDocumentFile(req: Request, res: Response): Promise<vo
         const downloadUrl = await getStorageService().getPresignedDownloadUrl({
           bucket: row.bucket,
           key: row.object_key,
-          responseContentDisposition: `attachment; filename="${normalizeUploadedOriginalName(row.original_name).replace(/"/g, "")}"`
+          responseContentDisposition: buildAttachmentContentDisposition(row.original_name)
         });
         res.redirect(downloadUrl);
         return;
@@ -1726,4 +1751,3 @@ export async function listCompanyEmployees(req: Request, res: Response): Promise
     res.status(500).json({ message: "Ошибка получения сотрудников" });
   }
 }
-

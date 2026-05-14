@@ -50,8 +50,16 @@ function buildObjectKey(ownerId: number, documentId: string, fileName: string): 
 }
 
 function contentDispositionAttachment(fileName: string): string {
-  const fallbackName = sanitizeFileName(fileName).replace(/"/g, "");
-  return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  const safeName = String(fileName || "document").replace(/[\u0000-\u001F\u007F]+/g, "_");
+  const fallbackName = safeName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/["\\;]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160) || "document";
+  return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`;
 }
 
 function resolveParserStorageDir(originalName: string, mimeType: string): string {

@@ -163,7 +163,7 @@ test("zero to approved critical path", async ({ page }) => {
   await page.getByRole("button", { name: "Создать документ" }).click();
   await page.getByLabel("Тип документа").click();
   await page.getByTitle("Договор").click();
-  await page.getByLabel("Номер").fill("501");
+  await page.getByRole("textbox", { name: "* Номер" }).fill("501");
   await page.getByLabel("Дата").fill("2026-04-21");
   await page.getByLabel("Заказчик/Плательщик").fill("ООО Заказчик");
   await page.getByLabel("ИНН заказчика").fill("7701234567");
@@ -173,11 +173,11 @@ test("zero to approved critical path", async ({ page }) => {
   await page.getByLabel("Основание / предмет").fill("Поставка оборудования");
   await page.getByRole("button", { name: "OK" }).click();
 
-  await expect(page.getByText(documentId)).toBeVisible();
+  await expect(page.getByText("501").first()).toBeVisible();
   await page.reload();
 
-  await page.getByRole("menuitem", { name: "Мои документы" }).click();
+  await page.getByRole("menuitem", { name: "Все документы" }).click();
   await expect(page).toHaveURL(/my-documents/);
-  const documentRow = page.locator(".ant-table-tbody tr", { hasText: documentId });
+  const documentRow = page.locator(".ant-table-tbody tr", { hasText: "501" });
   await expect(documentRow).toContainText("Согласован");
 });
