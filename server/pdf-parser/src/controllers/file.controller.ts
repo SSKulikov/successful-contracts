@@ -152,11 +152,21 @@ async function parseFunc(filename: string, fileExtension: string, rasterSourceAb
   const requisites = parse.parseRequisites(filename);
   const paymentData = parse.parsePaymentTerms(filename);
 
-
   const results = [];
   const llmProvider = resolveLlmProvider();
+  const enrichedDocumentArr = [...documentArr];
+  const focusedContext = [
+    requisites ? `Блок реквизитов и предмета:\n${requisites}` : null,
+    paymentData ? `Блок сумм и оплаты:\n${paymentData}` : null
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
-  for (const data of documentArr) {
+  if (focusedContext.trim()) {
+    enrichedDocumentArr.unshift(focusedContext.slice(0, 5000));
+  }
+
+  for (const data of enrichedDocumentArr) {
     try {
       const result =
         llmProvider === "yagpt"

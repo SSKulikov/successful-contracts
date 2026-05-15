@@ -35,6 +35,15 @@ export class ValidatorService {
       : null;
   }
 
+  private validateNullableString(value: any) {
+    if (value === null || value === undefined) return null;
+    const normalized = String(value).trim();
+    if (!normalized || normalized.toLowerCase() === "null" || normalized.toLowerCase() === "undefined") {
+      return null;
+    }
+    return normalized;
+  }
+
   private validateDate(value: any) {
     if (!value) return null;
     const date = new Date(value);
@@ -48,9 +57,9 @@ export class ValidatorService {
           inn: this.validateNumber(company.inn),
           kpp: this.validateNumber(company.kpp),
           ogrn: this.validateNumber(company.ogrn),
-          bik: this.validateString(company.bik),
-          corr_account: `${company.corr_account}`,
-          payment_account: `${company.payment_account}`,
+          bik: this.validateNullableString(company.bik),
+          corr_account: this.validateNullableString(company.corr_account),
+          payment_account: this.validateNullableString(company.payment_account),
           email: this.validateEmail(company.email),
           phone: this.validatePhone(company.phone),
           address: this.validateString(company.address),
@@ -98,11 +107,9 @@ export class ValidatorService {
       supplier_inn: this.validateNumber(data.supplier_inn),
       supplier_kpp: this.validateNumber(data.supplier_kpp),
       supplier_ogrn: this.validateNumber(data.supplier_ogrn),
-      supplier_bik: this.validateString(data.supplier_bik),
-      supplier_corr_account: `${this.validateNumber(data.supplier_corr_account)}`,
-      supplier_payment_account: this.validateNumber(
-        data.supplier_payment_account
-      ),
+      supplier_bik: this.validateNullableString(data.supplier_bik),
+      supplier_corr_account: this.validateNullableString(data.supplier_corr_account),
+      supplier_payment_account: this.validateNullableString(data.supplier_payment_account),
       supplier_email: this.validateEmail(data.supplier_email),
       supplier_phone: this.validatePhone(data.supplier_phone),
       supplier_address: this.validateString(data.supplier_address),
@@ -111,9 +118,9 @@ export class ValidatorService {
       customer_inn: this.validateNumber(data.customer_inn),
       customer_kpp: this.validateNumber(data.customer_kpp),
       customer_ogrn: this.validateNumber(data.customer_ogrn),
-      customer_bik: this.validateString(data.customer_bik),
-      customer_corr_account: `${data.customer_corr_account}`,
-      customer_payment_account: `${data.customer_payment_account}`,
+      customer_bik: this.validateNullableString(data.customer_bik),
+      customer_corr_account: this.validateNullableString(data.customer_corr_account),
+      customer_payment_account: this.validateNullableString(data.customer_payment_account),
       customer_email: this.validateEmail(data.customer_email),
       customer_phone: this.validatePhone(data.customer_phone),
       customer_address: this.validateString(data.customer_address),
