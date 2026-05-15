@@ -352,6 +352,11 @@ function buildAttachmentContentDisposition(fileName: string): string {
 }
 
 function buildAttachmentPublicUrl(req: Request, fileName: string): string {
+  const publicBase = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  if (publicBase) {
+    return `${publicBase}/api/document-files/${encodeURIComponent(fileName)}`;
+  }
+
   const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
   const host = req.get("host");
   return `${proto}://${host}/api/document-files/${encodeURIComponent(fileName)}`;
