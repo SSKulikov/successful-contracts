@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
   api:
     build:
       context: ./server/pdf-parser
@@ -12,7 +19,7 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:?set PUBLIC_APP_URL}
       CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN}
-      REDIS_URL: ${REDIS_URL:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
       S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT}
       S3_REGION: ${S3_REGION:?set S3_REGION}
@@ -26,6 +33,7 @@ services:
       PARSER_MAX_FILE_MB: ${PARSER_MAX_FILE_MB:-30}
       PARSER_JOB_TIMEOUT_MS: ${PARSER_JOB_TIMEOUT_MS:-120000}
       LLM_PROVIDER: ${LLM_PROVIDER:-gigachat}
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
       GIGA_CHAT_ACCESS_KEY: ${GIGA_CHAT_ACCESS_KEY:-}
       OAUTH_TOKEN: ${OAUTH_TOKEN:-}
       FOLDER_ID: ${FOLDER_ID:-}
@@ -33,6 +41,9 @@ services:
     volumes:
       - api_uploads:/app/uploads
       - api_storage_tmp:/app/storage
+    depends_on:
+      redis:
+        condition: service_started
     healthcheck:
       test:
         [
@@ -61,6 +72,6 @@ services:
       - "${WEB_PORT:-80}:80"
 
 volumes:
+  redis_data:
   api_uploads:
   api_storage_tmp:
-
