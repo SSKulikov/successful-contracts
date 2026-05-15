@@ -10,6 +10,7 @@ import {
   type SubmitForApprovalModalResult
 } from "../shared/components/SubmitForApprovalModal";
 import { getApiErrorMessage } from "../shared/utils/api-error";
+import { openSameAppApiUrl } from "../shared/utils/app-url";
 import {
   approvalsApi,
   documentsApi,
@@ -506,7 +507,7 @@ export function DocumentDetailsPage() {
                         key: "open",
                         width: 120,
                         render: (_, row: { url: string }) => (
-                          <Button type="link" style={{ paddingLeft: 0 }} onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}>
+                          <Button type="link" style={{ paddingLeft: 0 }} onClick={() => openSameAppApiUrl(row.url)}>
                             Открыть
                           </Button>
                         )

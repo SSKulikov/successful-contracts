@@ -22,6 +22,7 @@ import {
   type SubmitForApprovalModalResult
 } from "../shared/components/SubmitForApprovalModal";
 import { getApiErrorMessage } from "../shared/utils/api-error";
+import { openSameAppApiUrl, resolveSameAppApiUrl } from "../shared/utils/app-url";
 import {
   adminApi,
   contractsApi,
@@ -916,7 +917,7 @@ export function MyDocumentsPage() {
         open={attachmentsPickerOpen}
         onCancel={() => setAttachmentsPickerOpen(false)}
         onOk={() => {
-          if (selectedAttachmentUrl) window.open(selectedAttachmentUrl, "_blank", "noopener,noreferrer");
+          if (selectedAttachmentUrl) openSameAppApiUrl(selectedAttachmentUrl);
         }}
         okButtonProps={{ disabled: !selectedAttachmentUrl }}
         okText="Открыть"
@@ -929,7 +930,7 @@ export function MyDocumentsPage() {
           value={selectedAttachmentUrl ?? undefined}
           onChange={(value) => setSelectedAttachmentUrl(value)}
           options={pickedAttachments.map((item) => ({
-            value: item.url,
+            value: resolveSameAppApiUrl(item.url),
             label: `${item.originalName} (${item.uploadedAt})`
           }))}
         />

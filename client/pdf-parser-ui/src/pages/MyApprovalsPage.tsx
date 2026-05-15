@@ -15,6 +15,7 @@ import { StatusLegend } from "../shared/components/StatusLegend";
 import { PriorityTag } from "../shared/components/StatusTag";
 import { formatDateTime, formatMoney } from "../shared/utils/format";
 import { getApiErrorMessage } from "../shared/utils/api-error";
+import { openSameAppApiUrl, resolveSameAppApiUrl } from "../shared/utils/app-url";
 import { ApiErrorState } from "../shared/components/ApiErrorState";
 import { confirmCommentAction } from "../shared/utils/confirm-actions";
 import { ApprovalRow, VIEWED_DOCS_UPDATED_CLIENT_EVENT, approvalsApi, documentsApi, getStoredUserProfile, isPlatformAdminUser } from "../shared/api";
@@ -442,7 +443,7 @@ export function MyApprovalsPage() {
         open={attachmentsPickerOpen}
         onCancel={() => setAttachmentsPickerOpen(false)}
         onOk={() => {
-          if (selectedAttachmentUrl) window.open(selectedAttachmentUrl, "_blank", "noopener,noreferrer");
+          if (selectedAttachmentUrl) openSameAppApiUrl(selectedAttachmentUrl);
         }}
         okButtonProps={{ disabled: !selectedAttachmentUrl }}
         okText="Открыть"
@@ -454,7 +455,7 @@ export function MyApprovalsPage() {
           value={selectedAttachmentUrl ?? undefined}
           onChange={(value) => setSelectedAttachmentUrl(value)}
           options={pickedAttachments.map((item) => ({
-            value: item.url,
+            value: resolveSameAppApiUrl(item.url),
             label: `${item.originalName} (${item.uploadedAt})`
           }))}
         />
