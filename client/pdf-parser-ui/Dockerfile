@@ -3,8 +3,15 @@ FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
+ENV npm_config_audit=false \
+    npm_config_fund=false \
+    npm_config_progress=false \
+    npm_config_update_notifier=false \
+    npm_config_cache=/tmp/.npm
+
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 \
+  && npm cache clean --force
 
 ARG CACHE_BUST=1
 RUN echo "cache bust: ${CACHE_BUST}"

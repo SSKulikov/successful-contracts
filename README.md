@@ -122,3 +122,179 @@
 ИИ-распознавание – позже.
 
 Возможность добавить смету, интеграции с 1С и учётом – в следующих версиях.
+
+10. Docker Hub build/push и деплой
+
+Ниже описан ручной production-путь без сборки исходников на VPS: локально собираются Docker-образы, пушатся в Docker Hub, а Portainer скачивает готовые `api` и `web` images.
+
+10.1. Предварительные требования
+
+Установлены:
+
+```bash
+docker --version
+docker buildx version
+node --version
+npm --version
+```
+
+Перед push нужно войти в Docker Hub:
+
+```bash
+docker login
+```
+
+Во всех командах ниже замените `DOCKERHUB_USERNAME` на имя Docker Hub аккаунта.
+
+10.2. Backend image
+
+Backend собирается из `server/pdf-parser/Dockerfile`.
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t DOCKERHUB_USERNAME/successful-contracts-api:latest \
+  -f server/pdf-parser/Dockerfile \
+  ./server/pdf-parser \
+  --push
+```
+
+Если сборка на Mac нестабильна из-за Docker Desktop/network, повторите команду или очистите build cache:
+
+```bash
+docker builder prune -af
+```
+
+10.3. Frontend image
+
+Frontend лучше собирать в два шага: сначала Vite `dist`, потом nginx-образ с готовой статикой. Это исключает `npm ci` из Docker build фронта.
+
+```bash
+cd client/pdf-parser-ui
+VITE_API_URL=/api \
+VITE_USE_MOCK_API=false \
+VITE_USE_MOCK_ADMIN_API=false \
+VITE_USE_MOCK_PROFILE_API=false \
+npm run build
+cd ../..
+```
+
+После этого собрать и запушить nginx image:
+
+```bash
+docker buildx build \
+  --platform linux/amd64 \
+  -t DOCKERHUB_USERNAME/successful-contracts-web:latest \
+  -f client/pdf-parser-ui/Dockerfile.prebuilt \
+  ./client/pdf-parser-ui \
+  --push
+```
+
+Важно: для production со встроенным nginx proxy используйте `VITE_API_URL=/api`. Тогда браузер будет обращаться к API через тот же origin: `/api/auth/login`, `/api/documents/...` и т.д.
+
+10.4. Docker Compose для Portainer
+
+В Portainer можно создать stack через Web editor и указать готовые Docker Hub images:
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  api:
+    image: DOCKERHUB_USERNAME/successful-contracts-api:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      REDIS_URL: redis://redis:6379
+
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET_RAW: ${S3_BUCKET_RAW}
+      S3_BUCKET_PROCESSED: ${S3_BUCKET_PROCESSED}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      S3_PRESIGNED_UPLOAD_TTL_SEC: ${S3_PRESIGNED_UPLOAD_TTL_SEC:-900}
+      S3_PRESIGNED_DOWNLOAD_TTL_SEC: ${S3_PRESIGNED_DOWNLOAD_TTL_SEC:-900}
+
+      PARSER_MAX_FILE_MB: ${PARSER_MAX_FILE_MB:-30}
+      PARSER_JOB_TIMEOUT_MS: ${PARSER_JOB_TIMEOUT_MS:-120000}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gigachat}
+      NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-0}
+      GIGA_CHAT_ACCESS_KEY: ${GIGA_CHAT_ACCESS_KEY}
+      OAUTH_TOKEN: ${OAUTH_TOKEN:-}
+      FOLDER_ID: ${FOLDER_ID:-}
+      BEARER_TOKEN: ${BEARER_TOKEN:-}
+    volumes:
+      - api_uploads:/app/uploads
+      - api_storage_tmp:/app/storage
+    depends_on:
+      - redis
+
+  web:
+    image: DOCKERHUB_USERNAME/successful-contracts-web:latest
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  redis_data:
+  api_uploads:
+  api_storage_tmp:
+```
+
+Минимальные переменные окружения для Portainer stack:
+
+```env
+WEB_PORT=8080
+PUBLIC_APP_URL=http://your-domain.example:8080
+CORS_ORIGIN=http://your-domain.example:8080
+TRUST_PROXY=1
+
+DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DATABASE
+JWT_SECRET=replace-with-long-random-secret
+JWT_EXPIRES_IN=7d
+
+STORAGE_PROVIDER=s3
+S3_ENDPOINT=https://storage.yandexcloud.net
+S3_REGION=ru-central1
+S3_BUCKET_RAW=contracts-raw-prod
+S3_BUCKET_PROCESSED=contracts-processed-prod
+S3_ACCESS_KEY_ID=replace-me
+S3_SECRET_ACCESS_KEY=replace-me
+S3_FORCE_PATH_STYLE=false
+
+LLM_PROVIDER=gigachat
+NODE_TLS_REJECT_UNAUTHORIZED=0
+GIGA_CHAT_ACCESS_KEY=replace-me
+```
+
+10.5. Проверка после деплоя
+
+Проверить health:
+
+```bash
+curl http://your-domain.example:8080/health
+```
+
+Ожидаемый ответ:
+
+```json
+{"status":"ok","service":"pdf-parser"}
+```
+
+Если браузер пытается ходить на `localhost:3003`, frontend image собран неправильно. Пересоберите `dist` с `VITE_API_URL=/api`, затем заново соберите и запушьте `successful-contracts-web:latest`.

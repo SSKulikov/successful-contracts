@@ -267,7 +267,7 @@ export type CompanyProfile = {
   inn: string;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3003/api";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? "false") === "true";
 const USE_MOCK_ADMIN_API = (import.meta.env.VITE_USE_MOCK_ADMIN_API ?? "false") === "true";
 const USE_MOCK_PROFILE_API = (import.meta.env.VITE_USE_MOCK_PROFILE_API ?? "false") === "true";
