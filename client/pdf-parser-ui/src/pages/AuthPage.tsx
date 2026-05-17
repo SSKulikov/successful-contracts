@@ -119,9 +119,6 @@ export function AuthPage() {
                   <Button type="primary" block onClick={handleLogin}>
                     Войти
                   </Button>
-                  <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-                    Демо-админ: <code>admin</code> / <code>111</code>. Сотрудник: email и пароль от администратора компании.
-                  </Typography.Paragraph>
                 </Form>
               )
             },
