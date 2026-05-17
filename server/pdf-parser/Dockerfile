@@ -12,6 +12,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+ARG CACHE_BUST=1
+RUN echo "cache bust: ${CACHE_BUST}"
+
 COPY . .
 
 RUN npx prisma generate --schema=src/prisma/schema.prisma \

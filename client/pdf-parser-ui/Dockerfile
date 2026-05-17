@@ -6,6 +6,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+ARG CACHE_BUST=1
+RUN echo "cache bust: ${CACHE_BUST}"
+
 COPY . .
 
 # The nginx container proxies /api to the API service, so the SPA can use a same-origin API URL.
@@ -27,4 +30,3 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
-

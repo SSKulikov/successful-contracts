@@ -10,6 +10,8 @@ services:
     build:
       context: ./server/pdf-parser
       dockerfile: Dockerfile
+      args:
+        CACHE_BUST: ${BUILD_CACHE_BUST:-20260517}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -60,6 +62,7 @@ services:
       context: ./client/pdf-parser-ui
       dockerfile: Dockerfile
       args:
+        CACHE_BUST: ${BUILD_CACHE_BUST:-20260517}
         VITE_API_URL: ${VITE_API_URL:-/api}
         VITE_USE_MOCK_API: "false"
         VITE_USE_MOCK_ADMIN_API: "false"
